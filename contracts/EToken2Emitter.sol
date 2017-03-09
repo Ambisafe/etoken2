@@ -1,9 +1,15 @@
+/**
+ * This software is a subject to Ambisafe License Agreement.
+ * No use or distribution is allowed without written permission from Ambisafe.
+ * https://www.ambisafe.co/terms-of-use/
+ */
+
 pragma solidity 0.4.8;
 
 import './EventsHistory.sol';
 
 /**
- * @title ChronoBank Platform Emitter.
+ * @title EToken2 Emitter.
  *
  * Contains all the original event emitting function definitions and events.
  * In case of new events needed later, additional emitters can be developed.

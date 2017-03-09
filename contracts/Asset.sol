@@ -172,7 +172,7 @@ contract Asset is AssetInterface {
         }
     }
 
-    // Most probably the following should neever be redefined in child contracts.
+    // Most probably the following should never be redefined in child contracts.
     address genericSender;
     function _generic(bytes _data, address _sender) internal returns(bytes32) {
         // Restrict reentrancy.

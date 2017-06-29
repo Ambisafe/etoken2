@@ -6,7 +6,7 @@
 
 pragma solidity 0.4.8;
 
-import './EToken2.sol';
+import {EToken2Interface as EToken2} from './EToken2Interface.sol';
 import {AssetInterface as Asset} from './AssetInterface.sol';
 import {ERC20Interface as ERC20} from './ERC20Interface.sol';
 import './AssetProxyInterface.sol';

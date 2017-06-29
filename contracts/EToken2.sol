@@ -7,15 +7,7 @@
 pragma solidity 0.4.8;
 
 import './Ambi2EnabledFull.sol';
-
-contract RegistryICAPInterface {
-    function parse(bytes32 _icap) constant returns(address, bytes32, bool);
-    function institutions(bytes32 _institution) constant returns(address);
-}
-
-contract Cosigner {
-    function consumeOperation(bytes32 _opHash, uint _required) returns(bool);
-}
+import './EToken2Interface.sol';
 
 contract Emitter {
     function emitTransfer(address _from, address _to, bytes32 _symbol, uint _value, string _reference);
@@ -24,7 +16,6 @@ contract Emitter {
     function emitRevoke(bytes32 _symbol, uint _value, address _by);
     function emitOwnershipChange(address _from, address _to, bytes32 _symbol);
     function emitApprove(address _from, address _spender, bytes32 _symbol, uint _value);
-    function emitRecovery(address _from, address _to, address _by);
     function emitError(bytes32 _message);
     function emitChange(bytes32 _symbol);
 }
@@ -44,34 +35,12 @@ contract Proxy {
  * Every asset is meant to be used through a proxy contract. Only one proxy contract have access
  * rights for a particular asset.
  *
- * Features: assets issuance, transfers, allowances, supply adjustments, lost wallet access recovery.
- *           cosignature check, ICAP.
+ * Features: assets issuance, transfers, allowances, supply adjustments, ICAP.
  *
  * Note: all the non constant functions return false instead of throwing in case if state change
  * didn't happen yet.
  */
-contract EToken2 is Ambi2EnabledFull {
-    mapping(bytes32 => bool) switches;
-
-    function isEnabled(bytes32 _switch) constant returns(bool) {
-        return switches[_switch];
-    }
-
-    function enableSwitch(bytes32 _switch) onlyRole('issuance') returns(bool) {
-        switches[_switch] = true;
-        return true;
-    }
-
-    modifier checkEnabledSwitch(bytes32 _switch) {
-        if (!isEnabled(_switch)) {
-            _error('Feature is disabled');
-        } else {
-            _;
-        }
-    }
-
-    enum Features { Issue, TransferWithReference, Revoke, ChangeOwnership, Allowances, ICAP }
-
+contract EToken2 is EToken2Interface, Ambi2EnabledFull {
     // Structure of a particular asset.
     struct Asset {
         uint owner;                       // Asset's owner id.
@@ -90,16 +59,9 @@ contract EToken2 is Ambi2EnabledFull {
         mapping(uint => uint) allowance;
     }
 
-    // Structure of an asset holder.
-    struct Holder {
-        address addr;                    // Current address of the holder.
-        Cosigner cosigner;               // Cosigner contract for 2FA and recovery.
-        mapping(address => bool) trust;  // Addresses that are trusted with recovery proocedure.
-    }
-
     // Iterable mapping pattern is used for holders.
     uint public holdersCount;
-    mapping(uint => Holder) public holders;
+    mapping(uint => address) public holders;
 
     // This is an access address mapping. Many addresses may have access to a single holder.
     mapping(address => uint) holderIndex;
@@ -165,7 +127,7 @@ contract EToken2 is Ambi2EnabledFull {
      * Emits Error if called not by asset owner.
      */
     modifier onlyOwner(bytes32 _symbol) {
-        if (_isSignedOwner(_symbol)) {
+        if (isOwner(msg.sender, _symbol)) {
             _;
         } else {
             _error('Only owner: access denied');
@@ -181,21 +143,6 @@ contract EToken2 is Ambi2EnabledFull {
         } else {
             _error('Only proxy: access denied');
         }
-    }
-
-    /**
-     * Emits Error if _from doesn't trust _to.
-     */
-    modifier checkTrust(address _from, address _to) {
-        if (isTrusted(_from, _to)) {
-            _;
-        } else {
-            _error('Only trusted: access denied');
-        }
-    }
-
-    function _isSignedOwner(bytes32 _symbol) internal checkSigned(getHolderId(msg.sender), 1) returns(bool) {
-        return isOwner(msg.sender, _symbol);
     }
 
     /**
@@ -265,7 +212,7 @@ contract EToken2 is Ambi2EnabledFull {
      * @return asset owner address.
      */
     function owner(bytes32 _symbol) constant returns(address) {
-        return holders[assets[_symbol].owner].addr;
+        return holders[assets[_symbol].owner];
     }
 
     /**
@@ -301,7 +248,7 @@ contract EToken2 is Ambi2EnabledFull {
      */
     function balanceOf(address _holder, bytes32 _symbol) constant returns(uint) {
         uint holderId = getHolderId(_holder);
-        return holders[holderId].addr == _holder ? _balanceOf(holderId, _symbol) : 0;
+        return holders[holderId] == _holder ? _balanceOf(holderId, _symbol) : 0;
     }
 
     /**
@@ -324,7 +271,7 @@ contract EToken2 is Ambi2EnabledFull {
      * @return holder address.
      */
     function _address(uint _holderId) constant internal returns(address) {
-        return holders[_holderId].addr;
+        return holders[_holderId];
     }
 
     function _isProxy(bytes32 _symbol) constant internal returns(bool) {
@@ -341,7 +288,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function setProxy(address _address, bytes32 _symbol) onlyRole('admin') returns(bool) {
+    function setProxy(address _address, bytes32 _symbol) onlyOwner(_symbol) returns(bool) {
         if (proxies[_symbol] != 0x0 && assets[_symbol].isLocked) {
             return false;
         }
@@ -376,7 +323,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function _transfer(uint _fromId, uint _toId, uint _value, bytes32 _symbol, string _reference, uint _senderId) internal checkSigned(_senderId, 1) returns(bool) {
+    function _transfer(uint _fromId, uint _toId, uint _value, bytes32 _symbol, string _reference, uint _senderId) internal returns(bool) {
         // Should not allow to send to oneself.
         if (_fromId == _toId) {
             _error('Cannot send to oneself');
@@ -390,11 +337,6 @@ contract EToken2 is Ambi2EnabledFull {
         // Should have enough balance.
         if (_balanceOf(_fromId, _symbol) < _value) {
             _error('Insufficient balance');
-            return false;
-        }
-        // Should allow references.
-        if (bytes(_reference).length > 0 && !isEnabled(sha3(_symbol, Features.TransferWithReference))) {
-            _error('References feature is disabled');
             return false;
         }
         // Should have enough allowance.
@@ -414,15 +356,11 @@ contract EToken2 is Ambi2EnabledFull {
         return true;
     }
 
-    // Feature and proxy checks done internally due to unknown symbol when the function is called.
+    // Proxy check done internally due to unknown symbol when the function is called.
     function _transferToICAP(uint _fromId, bytes32 _icap, uint _value, string _reference, uint _senderId) internal returns(bool) {
         var (to, symbol, success) = registryICAP.parse(_icap);
         if (!success) {
             _error('ICAP is not registered');
-            return false;
-        }
-        if (!isEnabled(sha3(symbol, Features.ICAP))) {
-            _error('ICAP feature is disabled');
             return false;
         }
         if (!_isProxy(symbol)) {
@@ -481,7 +419,7 @@ contract EToken2 is Ambi2EnabledFull {
         uint holderId = holderIndex[_holder];
         if (holderId == 0) {
             holderId = ++holdersCount;
-            holders[holderId].addr = _holder;
+            holders[holderId] = _holder;
             holderIndex[_holder] = holderId;
         }
         return holderId;
@@ -505,7 +443,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function issueAsset(bytes32 _symbol, uint _value, string _name, string _description, uint8 _baseUnit, bool _isReissuable) checkEnabledSwitch(sha3(_symbol, _isReissuable, Features.Issue)) returns(bool) {
+    function issueAsset(bytes32 _symbol, uint _value, string _name, string _description, uint8 _baseUnit, bool _isReissuable) onlyRole('issuance') returns(bool) {
         // Should have positive value if supply is going to be fixed.
         if (_value == 0 && !_isReissuable) {
             _error('Cannot issue 0 value fixed asset');
@@ -593,7 +531,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function revokeAsset(bytes32 _symbol, uint _value) checkEnabledSwitch(sha3(_symbol, Features.Revoke)) checkSigned(getHolderId(msg.sender), 1) returns(bool) {
+    function revokeAsset(bytes32 _symbol, uint _value) returns(bool) {
         // Should have positive value.
         if (_value == 0) {
             _error('Cannot revoke 0 value');
@@ -626,7 +564,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function changeOwnership(bytes32 _symbol, address _newOwner) checkEnabledSwitch(sha3(_symbol, Features.ChangeOwnership)) onlyOwner(_symbol) returns(bool) {
+    function changeOwnership(bytes32 _symbol, address _newOwner) onlyOwner(_symbol) returns(bool) {
         Asset asset = assets[_symbol];
         uint newOwnerId = _createHolderId(_newOwner);
         // Should pass ownership to another holder.
@@ -642,134 +580,6 @@ contract EToken2 is Ambi2EnabledFull {
         return true;
     }
 
-    function setCosignerAddress(Cosigner _cosigner) checkSigned(_createHolderId(msg.sender), 1) returns(bool) {
-        if (!_checkSigned(_cosigner, getHolderId(msg.sender), 1)) {
-            _error('Invalid cosigner');
-            return false;
-        }
-        holders[_createHolderId(msg.sender)].cosigner = _cosigner;
-        return true;
-    }
-
-    function isCosignerSet(uint _holderId) constant returns(bool) {
-        return address(holders[_holderId].cosigner) != 0x0;
-    }
-
-    function _checkSigned(Cosigner _cosigner, uint _holderId, uint _required) internal returns(bool) {
-        return _cosigner.consumeOperation(sha3(msg.data, _holderId), _required);
-    }
-
-    modifier checkSigned(uint _holderId, uint _required) {
-        if (!isCosignerSet(_holderId) || _checkSigned(holders[_holderId].cosigner, _holderId, _required)) {
-            _;
-        } else {
-            _error('Cosigner: access denied');
-        }
-    }
-
-    /**
-     * Check if specified holder trusts an address with recovery procedure.
-     *
-     * @param _from truster.
-     * @param _to trustee.
-     *
-     * @return trust existance.
-     */
-    function isTrusted(address _from, address _to) constant returns(bool) {
-        return holders[getHolderId(_from)].trust[_to];
-    }
-
-    /**
-     * Trust an address to perform recovery procedure for the caller.
-     *
-     * @param _to trustee.
-     *
-     * @return success.
-     */
-    function trust(address _to) returns(bool) {
-        uint fromId = _createHolderId(msg.sender);
-        // Should trust to another address.
-        if (fromId == getHolderId(_to)) {
-            _error('Cannot trust to oneself');
-            return false;
-        }
-        // Should trust to yet untrusted.
-        if (isTrusted(msg.sender, _to)) {
-            _error('Already trusted');
-            return false;
-        }
-        holders[fromId].trust[_to] = true;
-        return true;
-    }
-
-    /**
-     * Revoke trust to perform recovery procedure from an address.
-     *
-     * @param _to trustee.
-     *
-     * @return success.
-     */
-    function distrust(address _to) checkTrust(msg.sender, _to) returns(bool) {
-        holders[getHolderId(msg.sender)].trust[_to] = false;
-        return true;
-    }
-
-    /**
-     * Perform recovery procedure.
-     *
-     * This function logic is actually more of an grantAccess(uint _holderId, address _to).
-     * It grants another address access to recovery subject wallets.
-     * Can only be called by trustee of recovery subject.
-     * If cosigning is enabled, should have atleast 2 confirmations.
-     *
-     * @dev Deprecated. Backward compatibility.
-     *
-     * @param _from holder address to recover from.
-     * @param _to address to grant access to.
-     *
-     * @return success.
-     */
-    function recover(address _from, address _to) checkTrust(_from, msg.sender) returns(bool) {
-        return _grantAccess(getHolderId(_from), _to);
-    }
-
-    /**
-     * Perform recovery procedure.
-     *
-     * This function logic is actually more of an grantAccess(uint _holderId, address _to).
-     * It grants another address access to subject holder wallets.
-     * Can only be called if pre-confirmed by atleast 2 cosign oracles.
-     *
-     * @param _from holder address to recover from.
-     * @param _to address to grant access to.
-     *
-     * @return success.
-     */
-    function grantAccess(address _from, address _to) returns(bool) {
-        if (!isCosignerSet(getHolderId(_from))) {
-            _error('Cosigner not set');
-            return false;
-        }
-        return _grantAccess(getHolderId(_from), _to);
-    }
-
-    function _grantAccess(uint _fromId, address _to) internal checkSigned(_fromId, 2) returns(bool) {
-        // Should recover to previously unused address.
-        if (getHolderId(_to) != 0) {
-            _error('Should recover to new address');
-            return false;
-        }
-        // We take current holder address because it might not equal _from.
-        // It is possible to recover from any old holder address, but event should have the current one.
-        address from = holders[_fromId].addr;
-        holders[_fromId].addr = _to;
-        holderIndex[_to] = _fromId;
-        // Internal Out Of Gas/Throw: revert this transaction too;
-        // Recursive Call: safe, all changes already made.
-        eventsHistory.emitRecovery(from, _to, msg.sender);
-        return true;
-    }
-
     /**
      * Sets asset spending allowance for a specified spender.
      *
@@ -782,7 +592,7 @@ contract EToken2 is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function _approve(uint _spenderId, uint _value, bytes32 _symbol, uint _senderId) internal checkEnabledSwitch(sha3(_symbol, Features.Allowances)) checkSigned(_senderId, 1) returns(bool) {
+    function _approve(uint _spenderId, uint _value, bytes32 _symbol, uint _senderId) internal returns(bool) {
         // Asset should exist.
         if (!isCreated(_symbol)) {
             _error('Asset is not issued');

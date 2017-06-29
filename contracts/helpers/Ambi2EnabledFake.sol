@@ -6,13 +6,8 @@
 
 pragma solidity 0.4.8;
 
-import './Asset.sol';
-import './Ambi2EnabledFull.sol';
-
-contract AssetWithAmbi is Asset, Ambi2EnabledFull {
+contract Ambi2EnabledFake {
     modifier onlyRole(bytes32 _role) {
-        if (address(ambi2) != 0x0 && (ambi2.hasRole(this, _role, _sender()))) {
-            _;
-        }
+        _;
     }
 }

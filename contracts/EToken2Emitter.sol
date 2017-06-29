@@ -22,7 +22,6 @@ library EToken2Emitter {
     event Revoke(bytes32 indexed symbol, uint value, address by, uint version);
     event OwnershipChange(address indexed from, address indexed to, bytes32 indexed symbol, uint version);
     event Approve(address indexed from, address indexed spender, bytes32 indexed symbol, uint value, uint version);
-    event Recovery(address indexed from, address indexed to, address by, uint version);
     event Error(bytes32 message, uint version);
     event Change(bytes32 indexed symbol, uint version);
     
@@ -48,10 +47,6 @@ library EToken2Emitter {
 
     function emitApprove(address _from, address _spender, bytes32 _symbol, uint _value) {
         Approve(_from, _spender, _symbol, _value, _getVersion());
-    }
-
-    function emitRecovery(address _from, address _to, address _by) {
-        Recovery(_from, _to, _by, _getVersion());
     }
 
     function emitError(bytes32 _message) {

@@ -194,7 +194,7 @@ contract Asset is AssetInterface {
     function _callReturn(address _target, bytes _data, uint _value) internal returns(bytes32 result) {
         bool success;
         assembly {
-            success := call(div(mul(gas, 63), 64), _target, _value, add(_data, 32), mload(_data), 0, 32)
+            success := call(gas, _target, _value, add(_data, 32), mload(_data), 0, 32)
             result := mload(0)
         }
         if (!success) {

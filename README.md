@@ -9,14 +9,18 @@ Contracts infrastructure.
 - EventsHistory.sol holds all operations events to avoid events lost in case of base contract replacement during upgrade or extension.
 - EToken2Emitter.sol provides EToken2 events definition.
 
-# Installation
+## [Regulation Aware Protocol](https://github.com/Ambisafe/regulation-aware-protocol)
+
+- AssetWithCompliance.sol acts as an integration link between a token and RAP Compliance Configuration (such as USPX).
+
+## Installation
 
 **NodeJS 6.x+ must be installed as a prerequisite.**
 ```
 $ npm install
 ```
 
-# Running tests
+## Running tests
 
 ```
 $ npm run testrpc

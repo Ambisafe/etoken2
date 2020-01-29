@@ -1,14 +1,9 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
+pragma solidity 0.5.8;
 
-pragma solidity 0.4.8;
 
 contract SafeMin {
-    modifier immutable(address _address) {
-        if (_address == 0) {
+    modifier immutableAddr(address _address) {
+        if (_address == address(0)) {
             _;
         }
     }
@@ -21,12 +16,11 @@ contract SafeMin {
     }
 
     function _safeSend(address _to, uint _value) internal {
-        if (!_unsafeSend(_to, _value)) {
-            throw;
-        }
+        require(_unsafeSend(_to, _value));
     }
 
     function _unsafeSend(address _to, uint _value) internal returns(bool) {
-        return _to.call.value(_value)();
+        (bool res, ) = _to.call.value(_value)('');
+        return res;
     }
 }

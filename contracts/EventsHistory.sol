@@ -1,21 +1,19 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
-
-pragma solidity 0.4.8;
+pragma solidity 0.5.8;
 
 import './Ambi2EnabledFull.sol';
+
 
 /**
  * @title Events History universal contract.
  *
- * Contract serves as an Events storage and version history for a particular contract type.
- * Events appear on this contract address but their definitions provided by other contracts/libraries.
+ * It serves as an Events storage and version history
+ * for a particular contract type.
+ * Events appear on this contract address,
+ * but their definitions provided by other contracts/libraries.
  * Version info is provided for historical and informational purposes.
  *
- * Note: all the non constant functions return false instead of throwing in case if state change
+ * Note: all the non constant functions return false
+ * instead of throwing in case if state change
  * didn't happen yet.
  */
 contract EventsHistory is Ambi2EnabledFull {
@@ -50,8 +48,9 @@ contract EventsHistory is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function addEmitter(bytes4 _eventSignature, address _emitter) onlyRole('setup') returns(bool) {
-        if (emitters[_eventSignature] != 0x0) {
+    function addEmitter(bytes4 _eventSignature, address _emitter)
+    public onlyRole('setup') returns(bool) {
+        if (emitters[_eventSignature] != address(0)) {
             return false;
         }
         emitters[_eventSignature] = _emitter;
@@ -70,7 +69,8 @@ contract EventsHistory is Ambi2EnabledFull {
      *
      * @return success.
      */
-    function addVersion(address _caller, string _name, string _changelog) onlyRole('admin') returns(bool) {
+    function addVersion(address _caller, string memory _name, string memory _changelog)
+    public onlyRole('admin') returns(bool) {
         if (versions[_caller] != 0) {
             return false;
         }
@@ -94,15 +94,14 @@ contract EventsHistory is Ambi2EnabledFull {
      *
      * Throws if emit function signature is not registered, or call failed.
      */
-    function () {
+    function () external {
         if (versions[msg.sender] == 0) {
             return;
         }
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Call Stack Depth Limit reached: n/a after HF 4;
         // Recursive Call: safe, all changes already made.
-        if (!emitters[msg.sig].delegatecall(msg.data)) {
-            throw;
-        }
+        (bool res,) = emitters[msg.sig].delegatecall(msg.data);
+        require(res);
     }
 }

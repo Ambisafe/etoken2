@@ -1,10 +1,5 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
+pragma solidity 0.5.8;
 
-pragma solidity 0.4.8;
 
 // For testing purposes.
 contract Listener {
@@ -13,7 +8,7 @@ contract Listener {
     address public sender;
     uint public calls;
 
-    function () payable {
+    function () external payable {
         data = msg.data;
         value = msg.value;
         sender = msg.sender;

@@ -1,31 +1,40 @@
 {
   "name": "etoken2",
-  "version": "2.0.0",
-  "description": "EToken2 ecosystem contracts",
+  "version": "3.0.0",
+  "description": "EToken2 public resources",
   "repository": {
     "type": "git",
-    "url": "git://github.com/Ambisafe/etoken2.git"
+    "url": "git@git.ambisafe.io:solidity/contracts/etoken2.git"
   },
   "scripts": {
     "compile": "truffle compile",
     "test": "truffle test",
-    "testrpc": "testrpc",
-    "truffle": "truffle"
+    "testrpc": "ganache-cli --gasLimit 6300000 --account='0x15bab7cc703515242f5811cc2e6a187241eb37999bbf091a7101fb609869c248, 0x204FCE5E3E25026110000000' --account='0xffbbc9388df09160b4bc040a556e286da0984267bfd24e55128f2cb8b63e6e0a, 0x204FCE5E3E25026110000000' --account='0x9841e2805aaa9eb3560639fb9c0dcbf19da67d6ccd058e0c32c4245e417ef5b6, 0x204FCE5E3E25026110000000' --account='0x2f063983ade4b7ed2dfaf1e596287ace0a8bead15933067fc81481c1126e79c5, 0x204FCE5E3E25026110000000' --account='0x302385e9b1dccff470812e84873db6009f5a854c62fd9feddf936d429338b6c9, 0x204FCE5E3E25026110000000' --account='0x942b148e9fefd36f1627796bc2c5d0f1c2006e1b1a30c9e32bd5f76dfdb94b41, 0x204FCE5E3E25026110000000' --account='0x4e6cd3109dd892af4489e9a274bbf47ab7baed58f911268d8772320f312ec83d, 0x204FCE5E3E25026110000000' --account='0xd5ce0244851f5e742308f5d279a3ab73d277b21028a6bf05699a6eb2f3bfd164, 0x204FCE5E3E25026110000000' --account='0xbe9b14aa3d45a1abfeb09d6584796206244caa1dd514e38c74c7d6698449a5cf, 0x204FCE5E3E25026110000000' --account='0xa849616185451308377d24a9169cba8a458bed1df50362ee7603a75dd1a42e0b, 0x204FCE5E3E25026110000000' --account='0x8bb36e8f62b1cced5845a47b38e3fd726e6f867a34c586d12e83f7ec0ce136f2, 0x204FCE5E3E25026110000000' --account='0x6dc14df164c226a858adca4e0c822a346cc3f29425afc1736171cd232de1160a, 0x204FCE5E3E25026110000000' --account='0x5fe3f217239041ea033790ee2b63fef81015ecaf896f02187f0a13c4be0facc2, 0x204FCE5E3E25026110000000' --account='0x48c0c0b35d95a7ef2fdf65f4556a3b8b0613069b3b75271c476f25a8911bb682, 0x204FCE5E3E25026110000000' --account='0x6461ae782bec0a3aa69c58024b4cb70d3d0e9bd4f32e9092bcc9c8fe1d76584d, 0x204FCE5E3E25026110000000' --account='0x7dbe7a5e5becb53780d70485d369b749e43fd4e0f523fefea2ee21d13ff3346c, 0x204FCE5E3E25026110000000' --account='0xe069c65cd9e51fa0a489c584abd342efe019554b66aec8fa66a88dcf201e4acc, 0x204FCE5E3E25026110000000' --account='0x56e352885970d1fad5578b3bedd0df55fbf4384f59c8b2e471eb9180900d1824, 0x204FCE5E3E25026110000000' --account='0x01f1e67e54d0603a5bc40053ab1a59b01d103b338ac5783b3ca3ddbb71b4a4ec, 0x204FCE5E3E25026110000000' --account='0xd00358be1dcada417c7132e4e03083578934f0f658b7a658857127d1674d9abe, 0x204FCE5E3E25026110000000'",
+    "truffle": "truffle",
+    "validate": "eslint test/*.js && solhint contracts/*.sol contracts/*/*.sol"
   },
   "keywords": [
     "etoken",
     "etoken2",
     "ethereum"
   ],
-  "author": "Oleksii Matiiasevych <oleksii@ambisafe.co> (Ambisafe Inc.)",
-  "license": "https://www.ambisafe.co/terms-of-use/",
+  "author": "Oleksii Matiiasevych <oleksii@ambisafe.com> (Ambisafe Inc.)",
+  "license": "https://ambisafe.com/terms.pdf",
   "bugs": {
-    "url": "https://github.com/Ambisafe/etoken2/issues"
+    "url": "https://gitlab.ambisafe.io/solidity/contracts/etoken2/issues"
   },
-  "homepage": "https://github.com/Ambisafe/etoken2",
+  "homepage": "https://gitlab.ambisafe.io/solidity/contracts/etoken2",
   "dependencies": {
-    "ethereumjs-testrpc": "^3.0.3",
-    "truffle": "3.1.9"
+    "argparse": "1.0.10",
+    "bluebird": "3.5.4",
+    "ganache-cli": "6.4.3",
+    "truffle": "5.0.17",
+    "truffle-security": "1.4.1"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "chai": "4.2.0",
+    "eslint": "^5.16.0",
+    "eslint-config-google": "0.12.0",
+    "solhint": "2.0.0"
+  }
 }

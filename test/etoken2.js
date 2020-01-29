@@ -1,2647 +1,2335 @@
-const Reverter = require('./helpers/reverter');
-const decodeLogs = require('./helpers/decodelogs');
-const bytes32 = require('./helpers/bytes32');
-const sha3 = require('./helpers/sha3');
+const Ganache = require('../dependencies/test/helpers/ganache');
+const decodeLogs = require('../dependencies/test/helpers/decodelogs');
+const bytes32 = require('../dependencies/test/helpers/bytes32');
 
-const EToken2Testable = artifacts.require('./EToken2Testable.sol');
-const EventsHistoryTestable = artifacts.require('./EventsHistoryTestable.sol');
-const EToken2Emitter = artifacts.require('./EToken2Emitter.sol');
-const RegistryICAPTestable = artifacts.require('./RegistryICAPTestable.sol');
-const UserContract = artifacts.require('./UserContract.sol');
+const EToken2Testable = artifacts.require('./EToken2Testable');
+const EventsHistoryTestable = artifacts.require('./EventsHistoryTestable');
+const EToken2Emitter = artifacts.require('./EToken2Emitter');
+const RegistryICAPTestable = artifacts.require('./RegistryICAPTestable');
+const UserContract = artifacts.require('./UserContract');
 
-contract('EToken2', accounts => {
-  const reverter = new Reverter(web3);
-  afterEach('revert', reverter.revert);
+contract('EToken2', (accounts) => {
+  const ganache = new Ganache(web3);
+  afterEach('revert', ganache.revert);
 
-  const UINT_256_MINUS_3 = '1.15792089237316195423570985008687907853269984665640564039457584007913129639933e+77';
-  const UINT_256_MINUS_2 = '1.15792089237316195423570985008687907853269984665640564039457584007913129639934e+77';
-  const UINT_256_MINUS_1 = '1.15792089237316195423570985008687907853269984665640564039457584007913129639935e+77';
-  const UINT_256 = '1.15792089237316195423570985008687907853269984665640564039457584007913129639936e+77';
-  const UINT_255_MINUS_1 = '5.7896044618658097711785492504343953926634992332820282019728792003956564819967e+76';
-  const UINT_255 = '5.7896044618658097711785492504343953926634992332820282019728792003956564819968e+76';
+  const bn = (number) => {
+    return web3.utils.toBN(number);
+  };
 
-  const BYTES_32 = '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
-  const BITS_257 = '0x10000000000000000000000000000000000000000000000000000000000000000';
-  const ADDRESS_ZERO = '0x0000000000000000000000000000000000000000';
+  const UINT_256_MINUS_3 = bn(2).pow(bn(256)).subn(3);
+  const UINT_256_MINUS_2 = bn(2).pow(bn(256)).subn(2);
+  const UINT_256_MINUS_1 = bn(2).pow(bn(256)).subn(1);
+  const UINT_255_MINUS_1 = bn(2).pow(bn(255)).subn(1);
+  const UINT_255 = bn(2).pow(bn(255));
 
+  const BYTES_32 = `0x${'f'.repeat(64)}`;
+  const ADDRESS_ZERO = `0x${'0'.repeat(40)}`;
+  const OWNER = accounts[0];
+  const NON_OWNER = accounts[1];
+  const NON_ASSET = web3.utils.fromAscii('LHNONEXIST');
   const SYMBOL = bytes32(100);
   const NAME = 'Test Name';
+  const NAME2 = '2Test Name2';
   const DESCRIPTION = 'Test Description';
+  const DESCRIPTION2 = '2Test Description2';
   const VALUE = 1001;
   const BASE_UNIT = 2;
-  const IS_REISSUABLE = false;
-
-  const Features = { Issue: 0, TransferWithReference: 1, Revoke: 2, ChangeOwnership: 3, Allowances: 4, ICAP: 5 };
+  const REISSUABLE = true;
+  const NOT_REISSUABLE = false;
 
   let etoken2;
   let eventsHistory;
   let userContract;
+  let etoken2Emitter;
 
-  before('setup', () => {
-    return EToken2Testable.deployed().then(instance => {
-      etoken2 = instance;
-      return UserContract.deployed();
-    }).then(instance => {
-      userContract = EToken2Testable.at(etoken2.address);      
-      return instance.init(etoken2.address);
-    }).then(() => {
-      return EventsHistoryTestable.deployed();
-    }).then(instance => {
-      eventsHistory = instance;
-      return EToken2Emitter.deployed();
-    }).then(etoken2Emitter => {
-      const etoken2EmitterAbi = etoken2Emitter.contract;
-      const fakeArgs = [0,0,0,0,0,0,0,0];
-      return etoken2.setupEventsHistory(eventsHistory.address)
-      .then(() => eventsHistory.addVersion(etoken2.address, 'Origin', 'Initial version.'))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitTransfer.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitTransferToICAP.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitIssue.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitRevoke.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitOwnershipChange.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitApprove.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitError.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory.addEmitter(etoken2EmitterAbi.emitChange.getData.apply(this, fakeArgs).slice(0, 10), etoken2Emitter.address))
-      .then(() => eventsHistory = EToken2Emitter.at(eventsHistory.address));
-    }).then(reverter.snapshot);
+  before('setup', async () => {
+    etoken2 = await EToken2Testable.new();
+    const instance = await UserContract.new();
+    userContract = await EToken2Testable.at(instance.address);
+    await instance.init(etoken2.address);
+    eventsHistory = await EventsHistoryTestable.new();
+    etoken2Emitter = await EToken2Emitter.new();
+    registryICAPTestable = await RegistryICAPTestable.new();
+    const etoken2EmitterAbi = etoken2Emitter.contract;
+    await etoken2.setupEventsHistory(eventsHistory.address);
+    await eventsHistory.addVersion(
+      etoken2.address, 'Origin', 'Initial version.');
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitTransfer(
+        ADDRESS_ZERO, ADDRESS_ZERO, bytes32(0), '', '')
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitTransferToICAP(
+        ADDRESS_ZERO, ADDRESS_ZERO, bytes32(0), '', '')
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitIssue(
+        bytes32(0), '', ADDRESS_ZERO)
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitRevoke(
+        bytes32(0), '', ADDRESS_ZERO)
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitOwnershipChange(
+        ADDRESS_ZERO, ADDRESS_ZERO, bytes32(0))
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitApprove(
+        ADDRESS_ZERO, ADDRESS_ZERO, bytes32(0), '')
+      .encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitError(
+        bytes32(0)).encodeABI().slice(0, 10), etoken2Emitter.address);
+    await eventsHistory.addEmitter(
+      etoken2EmitterAbi.methods.emitChange(
+        bytes32(0)).encodeABI().slice(0, 10), etoken2Emitter.address);
+    eventsHistory = await EToken2Emitter.at(eventsHistory.address);
+    await ganache.snapshot();
   });
 
-  const getEvents = (tx, name = false) => decodeLogs(tx.receipt.logs, eventsHistory, web3).filter(log => !name || log.event === name);
+  const getEvents = (tx, name = false) => decodeLogs(
+    tx.receipt.rawLogs, eventsHistory).filter(
+    (log) => !name || log.event === name);
 
-  const assertError = tx => {
+  const assertError = (tx) => {
     const events = getEvents(tx);
     assert.equal(events.length, 1);
     assert.equal(events[0].event, 'Error');
     return true;
   };
 
-  it('should not be possible to issue asset with existing symbol', () => {
-    var symbol = SYMBOL;
-    var value = 1001;
-    var value2 = 3021;
-    var name = 'Test Name';
-    var name2 = '2Test Name2';
-    var description = 'Test Description';
-    var description2 = '2Test Description2';
-    var baseUnit = 2;
-    var baseUnit2 = 4;
-    var isReissuable = false;
-    var isReissuable2 = true;
-    return etoken2.issueAsset(symbol, value, name, description, baseUnit, isReissuable).then(() => {
-      return etoken2.issueAsset(symbol, value2, name2, description2, baseUnit2, isReissuable2);
-    }).then(assertError).then(() => {
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), name);
-      return etoken2.totalSupply.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.description.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), description);
-      return etoken2.baseUnit.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), baseUnit);
-      return etoken2.isReissuable.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), isReissuable);
-    });
-  });
-  it('should be possible to issue asset with 1 bit 0 symbol', () => {
-    var symbol = SYMBOL;
-    return etoken2.issueAsset(symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-    });
-  });
-  it('should be possible to issue asset with 1 bit 1 symbol', () => {
-    var symbol = bytes32(200);
-    return etoken2.issueAsset(symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-    });
-  });
-  it('should be possible to issue asset with 32 bytes symbol', () => {
-    var symbol = BYTES_32;
-    return etoken2.issueAsset(symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-    });
-  });
-  it('should not be possible to issue fixed asset with 0 value', () => {
-    var value = 0;
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.name.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), '');
-    });
-  });
-  it('should be possible to issue fixed asset with 1 value', () => {
-    var value = 1;
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to issue fixed asset with (2**256 - 1) value', () => {
-    var value = UINT_256_MINUS_1;
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to issue reissuable asset with 0 value', () => {
-    var value = 0;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.name.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-    });
-  });
-  it('should be possible to issue reissuable asset with 1 value', () => {
-    var value = 1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to issue reissuable asset with (2**256 - 1) value', () => {
-    var value = UINT_256_MINUS_1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to issue asset with base unit 1', () => {
-    var baseUnit = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, baseUnit, IS_REISSUABLE).then(() => {
-      return etoken2.baseUnit.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 1);
-    });
-  });
-  it('should be possible to issue asset with base unit 255', () => {
-    var baseUnit = 255;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, baseUnit, IS_REISSUABLE).then(() => {
-      return etoken2.baseUnit.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 255);
-    });
-  });
-  it('should be possible to issue asset', () => {
-    var symbol = SYMBOL;
-    var value = 1001;
-    var name = 'Test Name';
-    var description = 'Test Description';
-    var baseUnit = 2;
-    var isReissuable = false;
-    return etoken2.issueAsset(symbol, value, name, description, baseUnit, isReissuable).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.symbol.valueOf(), symbol);
-      assert.equal(events[0].args.value.valueOf(), value);
-      assert.equal(events[0].args.by.valueOf(), accounts[0]);
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), name);
-      return etoken2.totalSupply.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.description.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), description);
-      return etoken2.baseUnit.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), baseUnit);
-      return etoken2.isReissuable.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), isReissuable);
-    });
-  });
-  it('should be possible to issue multiple assets', () => {
-    var symbol = SYMBOL;
-    var symbol2 = bytes32(200);
-    var owner = accounts[0];
-    var value = 1001;
-    var value2 = 3021;
-    var name = 'Test Name';
-    var name2 = '2Test Name2';
-    var description = 'Test Description';
-    var description2 = '2Test Description2';
-    var baseUnit = 2;
-    var baseUnit2 = 4;
-    var isReissuable = false;
-    var isReissuable2 = true;
-    return etoken2.issueAsset(symbol, value, name, description, baseUnit, isReissuable).then(() => {
-      return etoken2.issueAsset(symbol2, value2, name2, description2, baseUnit2, isReissuable2);
-    }).then(() => {
-      return etoken2.name.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), name);
-      return etoken2.name.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), name2);
-      return etoken2.totalSupply.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2);
-      return etoken2.description.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), description);
-      return etoken2.description.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), description2);
-      return etoken2.baseUnit.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), baseUnit);
-      return etoken2.baseUnit.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), baseUnit2);
-      return etoken2.isReissuable.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), isReissuable);
-      return etoken2.isReissuable.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), isReissuable2);
-      return etoken2.owner.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-      return etoken2.owner.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-    });
-  });
-  it('should be possible to get asset name', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.name.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-    });
-  });
-  it('should be possible to get asset description', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.description.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), DESCRIPTION);
-    });
-  });
-  it('should be possible to get asset base unit', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.baseUnit.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), BASE_UNIT);
-    });
-  });
-  it('should be possible to get asset reissuability', () => {
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.isReissuable.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), isReissuable);
-    });
-  });
-  it('should be possible to get asset owner', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), accounts[0]);
-    });
-  });
-  it('should be possible to check if address is asset owner', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.isOwner.call(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.isTrue(result.valueOf());
-    });
-  });
-  it('should be possible to check if address is owner of non-existing asset', () => {
-    return etoken2.isOwner.call(accounts[0], SYMBOL).then(result => {
-      assert.isFalse(result.valueOf());
-    });
-  });
-  it('should be possible to check if asset is created', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.isCreated.call(SYMBOL);
-    }).then(result => {
-      assert.isTrue(result.valueOf());
-    });
-  });
-  it('should be possible to check if asset is created for non-existing asset', () => {
-    return etoken2.isCreated.call(SYMBOL).then(result => {
-      assert.isFalse(result.valueOf());
-    });
-  });
-  it('should be possible to get asset total supply with single holder', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should be possible to get asset total supply with multiple holders', () => {
-    var amount = 1001;
-    var amount2 = 999;
-    var holder2 = accounts[1];
-    return etoken2.issueAsset(SYMBOL, amount + amount2, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, amount2, SYMBOL);
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount + amount2);
-    });
-  });
-  it('should be possible to get asset total supply with multiple holders holding 0 amount', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, VALUE, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder, VALUE, SYMBOL, {from: holder2});
-    }).then(() => {
-      return etoken2.revokeAsset(SYMBOL, VALUE);
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to get asset total supply with multiple holders holding (2**256 - 1) amount', () => {
-    var value = UINT_256_MINUS_1;
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, 10, SYMBOL);
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to get asset balance for holder', () => {
-    var owner = accounts[0];
-    var symbol2 = bytes32(10);
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, VALUE-10, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should be possible to get asset balance for non owner', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var amount = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-    });
-  });
-  it('should be possible to get asset balance for missing holder', () => {
-    var nonOwner = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to get missing asset balance for holder', () => {
-    var nonAsset = 'LHNONEXIST';
-    var owner = accounts[0];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.balanceOf.call(owner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to get missing asset balance for missing holder', () => {
-    var nonAsset = 'LHNONEXIST';
-    var nonOwner = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.balanceOf.call(nonOwner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to get name of missing asset', () => {
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.name.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), '');
-    });
-  });
-  it('should not be possible to get description of missing asset', () => {
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.description.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), '');
-    });
-  });
-  it('should not be possible to get base unit of missing asset', () => {
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.baseUnit.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to get reissuability of missing asset', () => {
-    var nonAsset = 'LHNONEXIST';
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.isReissuable.call(nonAsset);
-    }).then(result => {
-      assert.isFalse(result);
-    });
-  });
-  it('should not be possible to get owner of missing asset', () => {
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.owner.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), ADDRESS_ZERO);
-    });
-  });
-  it('should not be possible to get total supply of missing asset', () => {
-    return etoken2.totalSupply.call(SYMBOL).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to change ownership by non-owner', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeOwnership(SYMBOL, nonOwner, {from: nonOwner});
-    }).then(() => {
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-    });
-  });
-  it('should not be possible to change ownership to the same owner', () => {
-    var owner = accounts[0];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeOwnership(SYMBOL, owner);
-    }).then(assertError).then(() => {
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-    });
-  });
-  it('should not be possible to change ownership of missing asset', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeOwnership(nonAsset, nonOwner);
-    }).then(() => {
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-      return etoken2.owner.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), ADDRESS_ZERO);
-    });
-  });
-  it('should be possible to change ownership of asset', () => {
-    var owner = accounts[0];
-    var newOwner = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeOwnership(SYMBOL, newOwner);
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), owner);
-      assert.equal(events[0].args.to.valueOf(), newOwner);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), newOwner);
-    });
-  });
-  it('should be possible to reissue after ownership change', () => {
-    var owner = accounts[0];
-    var newOwner = accounts[1];
-    var isReissuable = true;
-    var amount = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.changeOwnership(SYMBOL, newOwner);
-    }).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount, {from: newOwner});
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE + amount);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(newOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-    });
-  });
-  it('should be possible to revoke after ownership change to missing account', () => {
-    var owner = accounts[0];
-    var newOwner = accounts[1];
-    var amount = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeOwnership(SYMBOL, newOwner);
-    }).then(() => {
-      return etoken2.transfer(newOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount, {from: newOwner});
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(newOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to revoke after ownership change to existing account', () => {
-    var owner = accounts[0];
-    var newOwner = accounts[1];
-    var amount = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(newOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.changeOwnership(SYMBOL, newOwner);
-    }).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount, {from: newOwner});
-    }).then(() => {
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(newOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should keep ownership change separated between assets', () => {
-    var owner = accounts[0];
-    var newOwner = accounts[1];
-    var symbol2 = bytes32(10);
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.changeOwnership(SYMBOL, newOwner);
-    }).then(() => {
-      return etoken2.owner.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), newOwner);
-      return etoken2.owner.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), owner);
-    });
-  });
-  it('should not be possible to transfer missing asset', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var amount = 100;
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, amount, nonAsset);
-    }).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(nonOwner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(owner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to transfer amount 1 with balance 0', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, VALUE, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(nonOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to transfer amount 2 with balance 1', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var value = 1;
-    var amount = 2;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to transfer amount (2**256 - 1) with balance (2**256 - 2)', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var value = UINT_256_MINUS_2;
-    var amount = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to transfer amount 0', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var amount = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, amount, SYMBOL);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to transfer to oneself', () => {
-    var owner = accounts[0];
-    var amount = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(owner, amount, SYMBOL);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to transfer amount (2**256 - 1) to holder with 1 balance', () => {
-    // Situation is impossible due to impossibility to issue more than (2**256 - 1) tokens for the asset.
-  });
-  it('should not be possible to transfer amount 1 to holder with (2**256 - 1) balance', () => {
-    // Situation is impossible due to impossibility to issue more than (2**256 - 1) tokens for the asset.
-  });
-  it('should not be possible to transfer amount 2**255 to holder with 2**255 balance', () => {
-    // Situation is impossible due to impossibility to issue more than (2**256 - 1) tokens for the asset.
-  });
-  it('should be possible to transfer amount 2**255 to holder with (2**255 - 1) balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var amount = UINT_255;
-    var balance2 = UINT_255_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, balance2, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to transfer amount (2**255 - 1) to holder with 2**255 balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var amount = UINT_255_MINUS_1;
-    var balance2 = UINT_255;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, balance2, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to transfer amount (2**256 - 2) to holder with 1 balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var amount = UINT_256_MINUS_2;
-    var balance2 = 1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, balance2, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to transfer amount 1 to holder with (2**256 - 2) balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var amount = 1;
-    var balance2 = UINT_256_MINUS_2;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, balance2, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to transfer amount 1 to existing holder with 0 balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, VALUE, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder, amount, SYMBOL, {from: holder2});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-    });
-  });
-  it('should be possible to transfer amount 1 to missing holder', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-    });
-  });
-  it('should be possible to transfer amount 1 to holder with non-zero balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var balance2 = 100;
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, balance2, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance2 + amount);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - balance2 - amount);
-    });
-  });
-  it('should be possible to transfer amount (2**256 - 1) to existing holder with 0 balance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var amount = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, amount, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.transfer(holder, amount, SYMBOL, {from: holder2});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-    });
-  });
-  it('should be possible to transfer amount (2**256 - 1) to missing holder', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var amount = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, amount, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(holder2, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should keep transfers separated between assets', () => {
-    var symbol = SYMBOL;
-    var symbol2 = bytes32(200);
-    var value = 500;
-    var value2 = 1000;
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var amount = 100;
-    var amount2 = 33;
-    return etoken2.issueAsset(symbol, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.transfer(holder2, amount, symbol);
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.to.valueOf(), holder2);
-      assert.equal(events[0].args.symbol.valueOf(), symbol);
-      assert.equal(events[0].args.value.valueOf(), amount);
-      assert.equal(events[0].args.reference.valueOf(), '');
-      return etoken2.transfer(holder2, amount2, symbol2);
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.to.valueOf(), holder2);
-      assert.equal(events[0].args.symbol.valueOf(), symbol2);
-      assert.equal(events[0].args.value.valueOf(), amount2);
-      assert.equal(events[0].args.reference.valueOf(), '');
-      return etoken2.balanceOf.call(holder, symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value - amount);
-      return etoken2.balanceOf.call(holder2, symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-      return etoken2.balanceOf.call(holder, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2 - amount2);
-      return etoken2.balanceOf.call(holder2, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount2);
-    });
-  });
-  it('should be possible to do transfer with reference', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var reference = 'Invoice#AS001';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transferWithReference(holder2, VALUE, SYMBOL, reference);
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.to.valueOf(), holder2);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      assert.equal(events[0].args.value.valueOf(), VALUE);
-      assert.equal(events[0].args.reference.valueOf(), reference);
-      return etoken2.balanceOf.call(holder2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to reissue asset by non-owner', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, 100, {from: nonOwner});
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to reissue fixed asset', () => {
-    var owner = accounts[0];
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, 100);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to reissue 0 of reissuable asset', () => {
-    var owner = accounts[0];
-    var isReissuable = true;
-    var amount = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to reissue missing asset', () => {
-    var owner = accounts[0];
-    var isReissuable = true;
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(nonAsset, 100);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(owner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to reissue 1 with total supply (2**256 - 1)', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_1;
-    var isReissuable = true;
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to reissue (2**256 - 1) with total supply 1', () => {
-    var owner = accounts[0];
-    var value = 1;
-    var isReissuable = true;
-    var amount = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to reissue 1 with total supply (2**256 - 2)', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_2;
-    var isReissuable = true;
-    var amount = 1;
-    var resultValue = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-    });
-  });
-  it('should be possible to reissue 1 with total supply 0', () => {
-    var owner = accounts[0];
-    var value = 0;
-    var isReissuable = true;
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value + amount);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value + amount);
-    });
-  });
-  it('should be possible to reissue (2**256 - 1) with total supply 0', () => {
-    var owner = accounts[0];
-    var value = 0;
-    var isReissuable = true;
-    var amount = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
-    });
-  });
-  it('should be possible to reissue (2**256 - 2) with total supply 1', () => {
-    var owner = accounts[0];
-    var value = 1;
-    var isReissuable = true;
-    var amount = UINT_256_MINUS_2;
-    var resultValue = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-    });
-  });
-  it('should be possible to reissue (2**255 - 1) with total supply 2**255', () => {
-    var owner = accounts[0];
-    var value = UINT_255;
-    var isReissuable = true;
-    var amount = UINT_255_MINUS_1;
-    var resultValue = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-    });
-  });
-  it('should be possible to reissue 2**255 with total supply (2**255 - 1)', () => {
-    var owner = accounts[0];
-    var value = UINT_255_MINUS_1;
-    var isReissuable = true;
-    var amount = UINT_255;
-    var resultValue = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-    });
-  });
-  it('should keep reissuance separated between assets', () => {
-    var symbol = SYMBOL;
-    var symbol2 = bytes32(200);
-    var value = 500;
-    var value2 = 1000;
-    var holder = accounts[0];
-    var amount = 100;
-    var amount2 = 33;
-    var isReissuable = true;
-    return etoken2.issueAsset(symbol, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.issueAsset(symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, isReissuable);
-    }).then(() => {
-      return etoken2.reissueAsset(symbol, amount);
-    }).then(() => {
-      return etoken2.reissueAsset(symbol2, amount2);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value + amount);
-      return etoken2.totalSupply.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value + amount);
-      return etoken2.balanceOf.call(holder, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2 + amount2);
-      return etoken2.totalSupply.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2 + amount2);
-    });
-  });
-  it('should not be possible to revoke 1 from missing asset', () => {
-    var owner = accounts[0];
-    var amount = 1;
-    var nonAsset = 'LHNONEXIST';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(nonAsset, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(owner, nonAsset);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to revoke 0 from fixed asset', () => {
-    var owner = accounts[0];
-    var amount = 0;
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to revoke 0 from reissuable asset', () => {
-    var owner = accounts[0];
-    var amount = 0;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should not be possible to revoke 1 with balance 0', () => {
-    var owner = accounts[0];
-    var value = 0;
-    var amount = 1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to revoke 2 with balance 1', () => {
-    var owner = accounts[0];
-    var value = 1;
-    var amount = 2;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to revoke (2**256 - 1) with balance (2**256 - 2)', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_2;
-    var amount = UINT_256_MINUS_1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not be possible to revoke 2**255 with balance (2**255 - 1)', () => {
-    var owner = accounts[0];
-    var value = UINT_255_MINUS_1;
-    var amount = UINT_255;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to revoke by non-owner', () => {
-    var owner = accounts[0];
-    var nonOwner = accounts[1];
-    var balance = 100;
-    var revokeAmount = 10;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(nonOwner, balance, SYMBOL);
-    }).then(() => {
-      return etoken2.revokeAsset(SYMBOL, revokeAmount, {from: nonOwner});
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - balance);
-      return etoken2.balanceOf.call(nonOwner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance - revokeAmount);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - revokeAmount);
-    });
-  });
-  it('should be possible to revoke 1 from fixed asset with 1 balance', () => {
-    var owner = accounts[0];
-    var value = 1;
-    var amount = 1;
-    var isReissuable = false;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      assert.equal(events[0].args.value.valueOf(), amount);
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to revoke 1 from reissuable asset with 1 balance', () => {
-    var owner = accounts[0];
-    var value = 1;
-    var amount = 1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to revoke 2**255 with 2**255 balance', () => {
-    var owner = accounts[0];
-    var value = UINT_255;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(SYMBOL, value);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to revoke (2**256 - 1) with (2**256 - 1) balance', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(SYMBOL, value);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to revoke 1 with 2 balance', () => {
-    var owner = accounts[0];
-    var value = 2;
-    var amount = 1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value - amount);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value - amount);
-    });
-  });
-  it('should be possible to revoke 2 with (2**256 - 1) balance', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_1;
-    var amount = 2;
-    var resultValue = UINT_256_MINUS_3;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-    });
-  });
-  it('should keep revokes separated between assets', () => {
-    var symbol = SYMBOL;
-    var symbol2 = bytes32(200);
-    var value = 500;
-    var value2 = 1000;
-    var holder = accounts[0];
-    var amount = 100;
-    var amount2 = 33;
-    return etoken2.issueAsset(symbol, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.revokeAsset(symbol, amount);
-    }).then(() => {
-      return etoken2.revokeAsset(symbol2, amount2);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value - amount);
-      return etoken2.totalSupply.call(symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value - amount);
-      return etoken2.balanceOf.call(holder, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2 - amount2);
-      return etoken2.totalSupply.call(symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2 - amount2);
-    });
-  });
-  it('should be possible to reissue 1 after revoke 1 with total supply (2**256 - 1)', () => {
-    var owner = accounts[0];
-    var value = UINT_256_MINUS_1;
-    var amount = 1;
-    var isReissuable = true;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable).then(() => {
-      return etoken2.revokeAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.reissueAsset(SYMBOL, amount);
-    }).then(() => {
-      return etoken2.balanceOf.call(owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.totalSupply.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
+  describe('Issue asset', () => {
+    it('should not be possible to issue asset with existing symbol', async () => {
+      const value = 1001;
+      const value2 = 3021;
+      const baseUnit2 = 4;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.issueAsset(
+        SYMBOL, value2, NAME2, DESCRIPTION2, baseUnit2, REISSUABLE);
+      await assertError(result);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), DESCRIPTION);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), BASE_UNIT);
+      assert.equal(
+        (await etoken2.isReissuable.call(SYMBOL)).valueOf(), NOT_REISSUABLE);
+    });
+
+    it('should be possible to issue asset with 1 bit 0 symbol', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+    });
+
+    it('should be possible to issue asset with 1 bit 1 symbol', async () => {
+      const symbol = bytes32(200);
+      await etoken2.issueAsset(
+        symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.name.call(symbol)).valueOf(), NAME);
+    });
+
+    it('should be possible to issue asset with 32 bytes symbol', async () => {
+      const symbol = BYTES_32;
+      await etoken2.issueAsset(
+        symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.name.call(symbol)).valueOf(), NAME);
+    });
+
+    it('should not be possible to issue fixed asset with 0 value', async () => {
+      const value = 0;
+      const isReissuable = false;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, isReissuable);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), '');
+    });
+
+    it('should be possible to issue fixed asset with 1 value', async () => {
+      const value = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to issue fixed asset with (2**256 - 1) value', async () => {
+      const value = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should be possible to issue reissuable asset with 0 value', async () => {
+      const value = 0;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+    });
+
+    it('should be possible to issue reissuable asset with 1 value', async () => {
+      const value = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to issue reissuable asset with (2**256 - 1) value', async () => {
+      const value = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should be possible to issue asset with base unit 1', async () => {
+      const baseUnit = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, baseUnit, NOT_REISSUABLE);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), 1);
+    });
+
+    it('should be possible to issue asset with base unit 255', async () => {
+      const baseUnit = 255;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, baseUnit, NOT_REISSUABLE);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), 255);
+    });
+
+    it('should be possible to issue asset', async () => {
+      const value = 1001;
+      const result = getEvents(
+        await etoken2.issueAsset(
+          SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), value);
+      assert.equal(result[0].args.by.valueOf(), accounts[0]);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), DESCRIPTION);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), BASE_UNIT);
+      assert.equal(
+        (await etoken2.isReissuable.call(SYMBOL)).valueOf(), NOT_REISSUABLE);
+    });
+
+    it('should be possible to issue multiple assets', async () => {
+      const symbol2 = bytes32(200);
+      const value = 1001;
+      const value2 = 3021;
+      const baseUnit2 = 4;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, value2, NAME2, DESCRIPTION2, baseUnit2, REISSUABLE);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+      assert.equal((await etoken2.name.call(symbol2)).valueOf(), NAME2);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
+      assert.equal((await etoken2.totalSupply.call(symbol2)).valueOf(), value2);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), DESCRIPTION);
+      assert.equal(
+        (await etoken2.description.call(symbol2)).valueOf(), DESCRIPTION2);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), BASE_UNIT);
+      assert.equal(
+        (await etoken2.baseUnit.call(symbol2)).valueOf(), baseUnit2);
+      assert.equal(
+        (await etoken2.isReissuable.call(SYMBOL)).valueOf(), NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.isReissuable.call(symbol2)).valueOf(), REISSUABLE);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), OWNER);
+      assert.equal((await etoken2.owner.call(symbol2)).valueOf(), OWNER);
     });
   });
 
-  it('should not be possible to set allowance for missing symbol', () => {
-    var owner = accounts[0];
-    var spender = accounts[1];
-    var missingSymbol = bytes32(33);
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 100, missingSymbol);
-    }).then(assertError).then(() => {
-      return etoken2.allowance.call(owner, spender, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+  describe('Reissue asset', () => {
+    it('should not be possible to reissue asset by non-owner', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(
+        SYMBOL, 100, {from: NON_OWNER});
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
     });
-  });
-  it('should not be possible to set allowance for missing symbol for oneself', () => {
-    var owner = accounts[0];
-    var missingSymbol = bytes32(33);
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(owner, 100, missingSymbol);
-    }).then(assertError).then(() => {
-      return etoken2.allowance.call(owner, owner, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to set allowance for oneself', () => {
-    var owner = accounts[0];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(owner, 100, SYMBOL);
-    }).then(assertError).then(() => {
-      return etoken2.allowance.call(owner, owner, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to set allowance from missing holder to missing holder', () => {
-    var holder = accounts[1];
-    var spender = accounts[2];
-    var value = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL, {from: holder});
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.spender.valueOf(), spender);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      assert.equal(events[0].args.value.valueOf(), value);
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance from missing holder to existing holder', () => {
-    var holder = accounts[1];
-    var spender = accounts[0];
-    var value = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL, {from: holder});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance from existing holder to missing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[2];
-    var value = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL, {from: holder});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance from existing holder to existing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[2];
-    var value = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, 1, SYMBOL, {from: holder});
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL, {from: holder});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance value 0', () => {
-    // Covered by 'should be possible to override allowance value with 0 value'.
-  });
-  it('should be possible to set allowance with (2**256 - 1) value', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance value less then balance', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance value equal to balance', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = VALUE;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to set allowance value more then balance', () => {
-    // Covered by 'should be possible to set allowance with (2**256 - 1) value'.
-  });
-  it('should be possible to override allowance value with 0 value', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to override allowance value with non 0 value', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 1000;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should not affect balance when setting allowance', () => {
-    var holder = accounts[0];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(accounts[1], 100, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-    });
-  });
-  it('should be possible to set allowance', () => {
-    // Covered by other tests above.
-  });
 
-  it('should not be possible to do allowance transfer by not allowed existing spender, from existing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 100;
-    var expectedSpenderBalance = 100;
-    var expectedHolderBalance = VALUE - value;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
+    it('should not be possible to reissue fixed asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, 100);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
     });
-  });
-  it('should not be possible to do allowance transfer by not allowed existing spender, from missing holder', () => {
-    var holder = accounts[2];
-    var spender = accounts[1];
-    var value = 100;
-    var expectedSpenderBalance = 100;
-    var expectedHolderBalance = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
+
+    it('should not be possible to reissue 0 of reissuable asset', async () => {
+      const amount = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.reissueAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
     });
-  });
-  it('should not be possible to do allowance transfer by not allowed missing spender, from existing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var expectedSpenderBalance = 0;
-    var expectedHolderBalance = VALUE;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
+
+    it('should not be possible to reissue missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(NON_ASSET, 100);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, NON_ASSET)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(NON_ASSET)).valueOf(), 0);
     });
-  });
-  it('should not be possible to do allowance transfer by not allowed missing spender, from missing holder', () => {
-    var holder = accounts[2];
-    var spender = accounts[1];
-    var expectedSpenderBalance = 0;
-    var expectedHolderBalance = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
+
+    it('should not be possible to reissue 1 with total supply (2**256 - 1)', async () => {
+      const value = UINT_256_MINUS_1;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.reissueAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
     });
-  });
-  it('should not be possible to do allowance transfer from and to the same holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 50, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, holder, 50, SYMBOL, {from: spender});
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
+
+    it('should not be possible to reissue (2**256 - 1) with total supply 1', async () => {
+      const value = 1;
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.reissueAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
     });
-  });
-  it('should be possible to do allowance transfer from oneself', () => {
-    var holder = accounts[0];
-    var receiver = accounts[1];
-    var amount = 50;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transferFrom(holder, receiver, amount, SYMBOL);
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE - amount);
-      return etoken2.balanceOf.call(receiver, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), amount);
+
+    it('should be possible to reissue 1 with total supply (2**256 - 2)', async () => {
+      const value = UINT_256_MINUS_2;
+      const amount = 1;
+      const resultValue = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        resultValue.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        resultValue.toString());
     });
-  });
-  it('should not be possible to do allowance transfer with 0 value', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 0;
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(assertError).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue 1 with total supply 0', async () => {
+      const value = 0;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(
+          OWNER, SYMBOL)).valueOf(), value + amount);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), value + amount);
     });
-  });
-  it('should not be possible to do allowance transfer with value less than balance, more than allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 1000;
-    var value = 999;
-    var allowed = 998;
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue (2**256 - 1) with total supply 0', async () => {
+      const value = 0;
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        amount.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        amount.toString());
     });
-  });
-  it('should not be possible to do allowance transfer with value equal to balance, more than allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 1000;
-    var value = 1000;
-    var allowed = 999;
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue (2**256 - 2) with total supply 1', async () => {
+      const value = 1;
+      const amount = UINT_256_MINUS_2;
+      const resultValue = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        resultValue.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        resultValue.toString());
     });
-  });
-  it('should not be possible to do allowance transfer with value more than balance, less than allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 199;
-    var value = 200;
-    var allowed = 201;
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue (2**255 - 1) with total supply 2**255', async () => {
+      const value = UINT_255;
+      const amount = UINT_255_MINUS_1;
+      const resultValue = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        resultValue.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        resultValue.toString());
     });
-  });
-  it('should not be possible to do allowance transfer with value less than balance, more than allowed after another tranfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 102;
-    var anotherValue = 10;
-    var value = 91;
-    var allowed = 100;
-    var expectedHolderBalance = balance - anotherValue;
-    var resultValue = anotherValue;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, anotherValue, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue 2**255 with total supply (2**255 - 1)', async () => {
+      const value = UINT_255_MINUS_1;
+      const amount = UINT_255;
+      const resultValue = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        resultValue.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        resultValue.toString());
     });
-  });
-  it('should not be possible to do allowance transfer with missing symbol when allowed for another symbol', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 1000;
-    var value = 200;
-    var allowed = 1000;
-    var missingSymbol = bytes32(33);
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, missingSymbol, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.balanceOf.call(holder, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(spender, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to do allowance transfer when allowed for another symbol', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 1000;
-    var value = 200;
-    var allowed = 1000;
-    var symbol2 = bytes32(2);
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, symbol2, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.balanceOf.call(holder, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should not be possible to do allowance transfer with missing symbol when not allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 1000;
-    var value = 200;
-    var missingSymbol = bytes32(33);
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transferFrom(holder, spender, value, missingSymbol, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), balance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
-      return etoken2.balanceOf.call(holder, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(spender, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-    });
-  });
-  it('should be possible to do allowance transfer by allowed existing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var existValue = 100;
-    var value = 300;
-    var expectedHolderBalance = VALUE - existValue - value;
-    var expectedSpenderBalance = existValue + value;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, existValue, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-    });
-  });
-  it('should be possible to do allowance transfer by allowed missing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 300;
-    var expectedHolderBalance = VALUE - value;
-    var expectedSpenderBalance = value;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-    });
-  });
-  it('should be possible to do allowance transfer to oneself', () => {
-    // Covered by 'should be possible to do allowance transfer by allowed existing spender'.
-  });
-  it('should be possible to do allowance transfer to existing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var receiver = accounts[2];
-    var existValue = 100;
-    var value = 300;
-    var expectedHolderBalance = VALUE - existValue - value;
-    var expectedReceiverBalance = existValue + value;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(receiver, existValue, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, receiver, value, SYMBOL, {from: spender});
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.to.valueOf(), receiver);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      assert.equal(events[0].args.value.valueOf(), value);
-      assert.equal(events[0].args.reference.valueOf(), '');
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(receiver, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedReceiverBalance);
-    });
-  });
-  it('should be possible to do allowance transfer to missing holder', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var receiver = accounts[2];
-    var value = 300;
-    var expectedHolderBalance = VALUE - value;
-    var expectedReceiverBalance = value;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, receiver, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(receiver, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedReceiverBalance);
-    });
-  });
-  it('should be possible to do allowance transfer with value less than balance and less than allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 201;
-    var value = 200;
-    var allowed = 201;
-    var expectedHolderBalance = balance - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to do allowance transfer with value less than balance and equal to allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 201;
-    var value = 200;
-    var allowed = 200;
-    var expectedHolderBalance = balance - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to do allowance transfer with value equal to balance and less than allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 200;
-    var value = 200;
-    var allowed = 201;
-    var expectedHolderBalance = balance - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to do allowance transfer with value equal to balance and equal to allowed', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 200;
-    var value = 200;
-    var allowed = 200;
-    var expectedHolderBalance = balance - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to do allowance transfer with value less than balance and less than allowed after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 201;
-    var anotherValue = 1;
-    var value = 199;
-    var allowed = 201;
-    var expectedSpenderBalance = anotherValue + value;
-    var expectedHolderBalance = balance - anotherValue - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, anotherValue, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-    });
-  });
-  it('should be possible to do allowance transfer with value less than balance and equal to allowed after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var balance = 201;
-    var anotherValue = 1;
-    var value = 199;
-    var allowed = 200;
-    var expectedSpenderBalance = anotherValue + value;
-    var expectedHolderBalance = balance - anotherValue - value;
-    return etoken2.issueAsset(SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, allowed, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, anotherValue, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedSpenderBalance);
-    });
-  });
-  it('should be possible to do allowance transfer with value (2**256 - 1)', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = UINT_256_MINUS_1;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.balanceOf.call(spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-    });
-  });
-  it('should be possible to do allowance transfer with reference', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var receiver = accounts[2];
-    var value = 300;
-    var expectedHolderBalance = VALUE - value;
-    var expectedReceiverBalance = value;
-    var reference = 'just some arbitrary string.';
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFromWithReference(holder, receiver, value, SYMBOL, reference, {from: spender});
-    }).then(getEvents).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), holder);
-      assert.equal(events[0].args.to.valueOf(), receiver);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      assert.equal(events[0].args.value.valueOf(), value);
-      assert.equal(events[0].args.reference.valueOf(), reference);
-      return etoken2.balanceOf.call(holder, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedHolderBalance);
-      return etoken2.balanceOf.call(receiver, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), expectedReceiverBalance);
+
+    it('should keep reissuance separated between assets', async () => {
+      const symbol2 = bytes32(200);
+      const value = 500;
+      const value2 = 1000;
+      const holder = accounts[0];
+      const amount = 100;
+      const amount2 = 33;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      await etoken2.reissueAsset(symbol2, amount2);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        value + amount);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value + amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, symbol2)).valueOf(),
+        value2 + amount2);
+      assert.equal(
+        (await etoken2.totalSupply.call(symbol2)).valueOf(),
+        value2 + amount2);
     });
   });
 
-  it('should return 0 allowance for existing owner and not allowed existing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+  describe('Revoke asset', () => {
+    it('should not be possible to revoke 1 from missing asset', async () => {
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(NON_ASSET, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, NON_ASSET)).valueOf(), 0);
     });
-  });
-  it('should return 0 allowance for existing owner and not allowed missing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke 0 from fixed asset', async () => {
+      const amount = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
     });
-  });
-  it('should return 0 allowance for missing owner and existing spender', () => {
-    var holder = accounts[1];
-    var spender = accounts[0];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke 0 from reissuable asset', async () => {
+      const amount = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
     });
-  });
-  it('should return 0 allowance for missing owner and missing spender', () => {
-    var holder = accounts[1];
-    var spender = accounts[2];
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke 1 with balance 0', async () => {
+      const value = 0;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), value);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
     });
-  });
-  it('should return 0 allowance for existing oneself', () => {
-    var holder = accounts[0];
-    var spender = holder;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke 2 with balance 1', async () => {
+      const value = 1;
+      const amount = 2;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), value);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), value);
     });
-  });
-  it('should return 0 allowance for missing oneself', () => {
-    var holder = accounts[1];
-    var spender = holder;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke (2**256 - 1) with balance (2**256 - 2)', async () => {
+      const value = UINT_256_MINUS_2;
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
     });
-  });
-  it('should return 0 allowance for missing symbol', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var missingSymbol = bytes32(33);
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, missingSymbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should not be possible to revoke 2**255 with balance (2**255 - 1)', async () => {
+      const value = UINT_255_MINUS_1;
+      const amount = UINT_255;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      const result = await etoken2.revokeAsset(SYMBOL, amount);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
     });
-  });
-  it('should respect symbol when telling allowance', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var symbol = SYMBOL;
-    var symbol2 = bytes32(2);
-    var value = 100;
-    var value2 = 200;
-    return etoken2.issueAsset(symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.issueAsset(symbol2, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.approve(spender, value, symbol);
-    }).then(() => {
-      return etoken2.approve(spender, value2, symbol2);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, symbol);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.allowance.call(holder, spender, symbol2);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2);
+
+    it('should be possible to revoke by non-owner', async () => {
+      const balance = 100;
+      const revokeAmount = 10;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, balance, SYMBOL);
+      const result = getEvents(
+        await etoken2.revokeAsset(SYMBOL, revokeAmount, {from: NON_OWNER}));
+      assert.equal(result.length, 1);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        VALUE - balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(),
+        balance - revokeAmount);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        VALUE - revokeAmount);
     });
-  });
-  it('should respect holder when telling allowance', () => {
-    var holder = accounts[0];
-    var holder2 = accounts[1];
-    var spender = accounts[2];
-    var value = 100;
-    var value2 = 200;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value2, SYMBOL, {from: holder2});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.allowance.call(holder2, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2);
+
+    it('should be possible to revoke 1 from fixed asset with 1 balance', async () => {
+      const value = 1;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = getEvents(await etoken2.revokeAsset(SYMBOL, amount));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), amount);
+      assert.equal((await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
     });
-  });
-  it('should respect spender when telling allowance', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var spender2 = accounts[2];
-    var value = 100;
-    var value2 = 200;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender2, value2, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
-      return etoken2.allowance.call(holder, spender2, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value2);
+
+    it('should be possible to revoke 1 from reissuable asset with 1 balance', async () => {
+      const value = 1;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, amount);
+      assert.equal((await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
     });
-  });
-  it('should be possible to check allowance of existing owner and allowed existing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 300;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.transfer(spender, 100, SYMBOL);
-    }).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
+
+    it('should be possible to revoke 2**255 with 2**255 balance', async () => {
+      const value = UINT_255;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, value);
+      assert.equal((await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
     });
-  });
-  it('should be possible to check allowance of existing owner and allowed missing spender', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 300;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), value);
+
+    it('should be possible to revoke (2**256 - 1) with (2**256 - 1) balance', async () => {
+      const value = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, value);
+      assert.equal((await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
     });
-  });
-  it('should return 0 allowance after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = 300;
-    var resultValue = 0;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, value, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to revoke 1 with 2 balance', async () => {
+      const value = 2;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value - amount);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value - amount);
     });
-  });
-  it('should return 1 allowance after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var receiver = accounts[2];
-    var value = 300;
-    var transfer = 299;
-    var resultValue = 1;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, receiver, transfer, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to revoke 2 with (2**256 - 1) balance', async () => {
+      const value = UINT_256_MINUS_1;
+      const amount = 2;
+      const resultValue = UINT_256_MINUS_3;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        resultValue.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        resultValue.toString());
     });
-  });
-  it('should return 2**255 allowance after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var transfer = UINT_255_MINUS_1;
-    var resultValue = UINT_255;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, transfer, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should keep revokes separated between assets', async () => {
+      const symbol2 = bytes32(200);
+      const value = 500;
+      const value2 = 1000;
+      const holder = accounts[0];
+      const amount = 100;
+      const amount2 = 33;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, amount);
+      await etoken2.revokeAsset(symbol2, amount2);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        value - amount);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), value - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, symbol2)).valueOf(),
+        value2 - amount2);
+      assert.equal(
+        (await etoken2.totalSupply.call(symbol2)).valueOf(), value2 - amount2);
     });
-  });
-  it('should return (2**256 - 2) allowance after another transfer', () => {
-    var holder = accounts[0];
-    var spender = accounts[1];
-    var value = UINT_256_MINUS_1;
-    var transfer = 1;
-    var resultValue = UINT_256_MINUS_2;
-    return etoken2.issueAsset(SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.approve(spender, value, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFrom(holder, spender, transfer, SYMBOL, {from: spender});
-    }).then(() => {
-      return etoken2.allowance.call(holder, spender, SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), resultValue);
+
+    it('should be possible to reissue 1 after revoke 1 with total supply (2**256 - 1)', async () => {
+      const value = UINT_256_MINUS_1;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.revokeAsset(SYMBOL, amount);
+      await etoken2.reissueAsset(SYMBOL, amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
     });
   });
 
-  it('should not allow proxy transfer froms from user contracts', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true, {from: accounts[1]}).then(() => {
-      return etoken2.__enableProxyCheck();
-    }).then(() => {
-      return etoken2.approve(accounts[0], VALUE, SYMBOL, {from: accounts[1]});
-    }).then(() => {
-      return userContract.proxyTransferFromWithReference(accounts[1], accounts[2], VALUE, SYMBOL, '', accounts[0]);
-    }).then(() => {
-      return etoken2.balanceOf.call(accounts[1], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.allowance.call(accounts[1], accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
+  describe('Get asset info', () => {
+    it('should be possible to get asset name', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
     });
-  });
-  it('should not allow proxy approves from user contracts', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true).then(() => {
-      return etoken2.__enableProxyCheck();
-    }).then(() => {
-      return userContract.proxyApprove(accounts[1], VALUE, SYMBOL, accounts[0]);
-    }).then(() => {
-      return etoken2.allowance.call(accounts[0], accounts[1], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
-      return etoken2.allowance.call(userContract.address, accounts[1], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should be possible to get asset description', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), DESCRIPTION);
     });
-  });
-  it('should not allow proxy transfers from to ICAP from user contracts', () => {
-    let icap;
-    const _icap = 'XE73TSTXREG123456789';
-    return RegistryICAPTestable.deployed().then(instance => {
-      icap = instance;
-      return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true);
-    }).then(() => {
-      return etoken2.__enableProxyCheck();
-    }).then(() => {
-      return etoken2.setupRegistryICAP(icap.address);
-    }).then(() => {
-      return icap.registerAsset('TST', SYMBOL);
-    }).then(() => {
-      return icap.registerInstitution('XREG', accounts[2]);
-    }).then(() => {
-      return icap.registerInstitutionAsset('TST', 'XREG', accounts[2], {from: accounts[2]});
-    }).then(() => {
-      return userContract.proxyTransferFromToICAPWithReference(accounts[0], _icap, VALUE, '', accounts[0]);
-    }).then(() => {
-      return etoken2.balanceOf.call(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE);
-      return etoken2.balanceOf.call(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 0);
+
+    it('should be possible to get asset base unit', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), BASE_UNIT);
+    });
+
+    it('should be possible to get asset reissuability', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      assert.equal(
+        (await etoken2.isReissuable.call(SYMBOL)).valueOf(), REISSUABLE);
+    });
+
+    it('should be possible to get asset owner', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), accounts[0]);
+    });
+
+    it('should be possible to check if address is asset owner', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.isTrue(
+        (await etoken2.isOwner.call(accounts[0], SYMBOL)).valueOf());
+    });
+
+    it('should be possible to check if address is owner of non-existing asset', async () => {
+      assert.isFalse(
+        (await etoken2.isOwner.call(accounts[0], SYMBOL)).valueOf());
+    });
+
+    it('should be possible to check if asset is created', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.isTrue((await etoken2.isCreated.call(SYMBOL)).valueOf());
+    });
+
+    it('should be possible to check if asset is created for non-existing asset', async () => {
+      assert.isFalse((await etoken2.isCreated.call(SYMBOL)).valueOf());
+    });
+
+    it('should be possible to get asset total supply with single holder', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should be possible to get asset total supply with multiple holders', async () => {
+      const amount = 1001;
+      const amount2 = 999;
+      const holder2 = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, amount + amount2, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, amount2, SYMBOL);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), amount + amount2);
+    });
+
+    it('should be possible to get asset total supply with multiple holders holding 0 amount', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, VALUE, SYMBOL);
+      await etoken2.transfer(holder, VALUE, SYMBOL, {from: holder2});
+      await etoken2.revokeAsset(SYMBOL, VALUE);
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to get asset total supply with multiple holders holding (2**256 - 1) amount', async () => {
+      const value = UINT_256_MINUS_1;
+      const holder2 = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, 10, SYMBOL);
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should be possible to get asset balance for holder', async () => {
+      const symbol2 = bytes32(10);
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, VALUE-10, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should be possible to get asset balance for non owner', async () => {
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), amount);
+    });
+
+    it('should be possible to get asset balance for missing holder', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to get missing asset balance for holder', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, NON_ASSET)).valueOf(), 0);
+    });
+
+    it('should be possible to get missing asset balance for missing holder', async () => {
+      const NON_OWNER = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, NON_ASSET)).valueOf(), 0);
+    });
+
+    it('should not be possible to get name of missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.name.call(NON_ASSET)).valueOf(), '');
+    });
+
+    it('should not be possible to get description of missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.description.call(NON_ASSET)).valueOf(), '');
+    });
+
+    it('should not be possible to get base unit of missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal((await etoken2.baseUnit.call(NON_ASSET)).valueOf(), 0);
+    });
+
+    it('should not be possible to get reissuability of missing asset', async () => {
+      const isReissuable = true;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, isReissuable);
+      assert.isFalse(await etoken2.isReissuable.call(NON_ASSET));
+    });
+
+    it('should not be possible to get owner of missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.owner.call(NON_ASSET)).valueOf(), ADDRESS_ZERO);
+    });
+
+    it('should not be possible to get total supply of missing asset', async () => {
+      assert.equal((await etoken2.totalSupply.call(SYMBOL)).valueOf(), 0);
     });
   });
 
-  it('should be possible to do transfer to ICAP', () => {
-    const _icap = 'XE73TSTXREG123456789';
-    let icap;
-    return RegistryICAPTestable.deployed().then(instance => {
-      icap = instance;
-      return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.setupRegistryICAP(icap.address);
-    }).then(() => {
-      return icap.registerAsset('TST', SYMBOL);
-    }).then(() => {
-      return icap.registerInstitution('XREG', accounts[2]);
-    }).then(() => {
-      return icap.registerInstitutionAsset('TST', 'XREG', accounts[2], {from: accounts[2]});
-    }).then(() => {
-      return etoken2.transferToICAP(_icap, 100);
-    }).then(tx => getEvents(tx, 'TransferToICAP')).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), accounts[0]);
-      assert.equal(events[0].args.to.valueOf(), accounts[2]);
-      assert.equal(web3.toAscii(events[0].args.icap.valueOf().substr(0, 42)), _icap);
-      assert.equal(events[0].args.value.toNumber(), 100);
-      assert.equal(events[0].args.reference.valueOf(), '');
-    }).then(() => {
-      return etoken2.balanceOf(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
-      return etoken2.balanceOf(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE-100);
+  describe('Change ownership', () => {
+    it('should not be possible to change ownership by non-owner', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.changeOwnership(SYMBOL, NON_OWNER, {from: NON_OWNER});
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), OWNER);
     });
-  });
-  it('should be possible to do transfer to ICAP with reference', () => {
-    const _icap = 'XE73TSTXREG123456789';
-    let icap;
-    return RegistryICAPTestable.deployed().then(instance => {
-      icap = instance;
-      return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.setupRegistryICAP(icap.address);
-    }).then(() => {
-      return icap.registerAsset('TST', SYMBOL);
-    }).then(() => {
-      return icap.registerInstitution('XREG', accounts[2]);
-    }).then(() => {
-      return icap.registerInstitutionAsset('TST', 'XREG', accounts[2], {from: accounts[2]});
-    }).then(() => {
-      return etoken2.transferToICAPWithReference(_icap, 100, 'Ref');
-    }).then(tx => getEvents(tx, 'TransferToICAP')).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), accounts[0]);
-      assert.equal(events[0].args.to.valueOf(), accounts[2]);
-      assert.equal(web3.toAscii(events[0].args.icap.valueOf().substr(0, 42)), _icap);
-      assert.equal(events[0].args.value.toNumber(), 100);
-      assert.equal(events[0].args.reference.valueOf(), 'Ref');
-    }).then(() => {
-      return etoken2.balanceOf(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
-      return etoken2.balanceOf(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE-100);
+
+    it('should not be possible to change ownership to the same owner', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.changeOwnership(SYMBOL, OWNER);
+      await assertError(result);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), OWNER);
     });
-  });
-  it('should be possible to do transfer from to ICAP', () => {
-    const _icap = 'XE73TSTXREG123456789';
-    let icap;
-    return RegistryICAPTestable.deployed().then(instance => {
-      icap = instance;
-      return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.setupRegistryICAP(icap.address);
-    }).then(() => {
-      return icap.registerAsset('TST', SYMBOL);
-    }).then(() => {
-      return icap.registerInstitution('XREG', accounts[2]);
-    }).then(() => {
-      return icap.registerInstitutionAsset('TST', 'XREG', accounts[2], {from: accounts[2]});
-    }).then(() => {
-      return etoken2.approve(accounts[1], 200, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFromToICAP(accounts[0], _icap, 100, {from: accounts[1]});
-    }).then(tx => getEvents(tx, 'TransferToICAP')).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), accounts[0]);
-      assert.equal(events[0].args.to.valueOf(), accounts[2]);
-      assert.equal(web3.toAscii(events[0].args.icap.valueOf().substr(0, 42)), _icap);
-      assert.equal(events[0].args.value.toNumber(), 100);
-      assert.equal(events[0].args.reference.valueOf(), '');
-    }).then(() => {
-      return etoken2.balanceOf(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
-      return etoken2.balanceOf(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE-100);
-      return etoken2.allowance(accounts[0], accounts[1], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
+
+    it('should not be possible to change ownership of missing asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.changeOwnership(NON_ASSET, NON_OWNER);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), OWNER);
+      assert.equal(
+        (await etoken2.owner.call(NON_ASSET)).valueOf(), ADDRESS_ZERO);
     });
-  });
-  it('should be possible to do transfer from to ICAP with reference', () => {
-    const _icap = 'XE73TSTXREG123456789';
-    let icap;
-    return RegistryICAPTestable.deployed().then(instance => {
-      icap = instance;
-      return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE);
-    }).then(() => {
-      return etoken2.setupRegistryICAP(icap.address);
-    }).then(() => {
-      return icap.registerAsset('TST', SYMBOL);
-    }).then(() => {
-      return icap.registerInstitution('XREG', accounts[2]);
-    }).then(() => {
-      return icap.registerInstitutionAsset('TST', 'XREG', accounts[2], {from: accounts[2]});
-    }).then(() => {
-      return etoken2.approve(accounts[1], 200, SYMBOL);
-    }).then(() => {
-      return etoken2.transferFromToICAPWithReference(accounts[0], _icap, 100, 'Ref', {from: accounts[1]});
-    }).then(tx => getEvents(tx, 'TransferToICAP')).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.from.valueOf(), accounts[0]);
-      assert.equal(events[0].args.to.valueOf(), accounts[2]);
-      assert.equal(web3.toAscii(events[0].args.icap.valueOf().substr(0, 42)), _icap);
-      assert.equal(events[0].args.value.toNumber(), 100);
-      assert.equal(events[0].args.reference.valueOf(), 'Ref');
-    }).then(() => {
-      return etoken2.balanceOf(accounts[2], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
-      return etoken2.balanceOf(accounts[0], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), VALUE-100);
-      return etoken2.allowance(accounts[0], accounts[1], SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), 100);
+
+    it('should be possible to change ownership of asset', async () => {
+      const newOwner = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = getEvents(await etoken2.changeOwnership(SYMBOL, newOwner));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), OWNER);
+      assert.equal(result[0].args.to.valueOf(), newOwner);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), newOwner);
+    });
+
+    it('should be possible to reissue after ownership change', async () => {
+      const newOwner = accounts[1];
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, REISSUABLE);
+      await etoken2.changeOwnership(SYMBOL, newOwner);
+      await etoken2.reissueAsset(SYMBOL, amount, {from: newOwner});
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE + amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(newOwner, SYMBOL)).valueOf(), amount);
+    });
+
+    it('should be possible to revoke after ownership change to missing account', async () => {
+      const newOwner = accounts[1];
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.changeOwnership(SYMBOL, newOwner);
+      await etoken2.transfer(newOwner, amount, SYMBOL);
+      await etoken2.revokeAsset(SYMBOL, amount, {from: newOwner});
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(newOwner, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to revoke after ownership change to existing account', async () => {
+      const newOwner = accounts[1];
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(newOwner, amount, SYMBOL);
+      await etoken2.changeOwnership(SYMBOL, newOwner);
+      await etoken2.revokeAsset(SYMBOL, amount, {from: newOwner});
+      assert.equal(
+        (await etoken2.totalSupply.call(SYMBOL)).valueOf(), VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(newOwner, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should keep ownership change separated between assets', async () => {
+      const newOwner = accounts[1];
+      const symbol2 = bytes32(10);
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.changeOwnership(SYMBOL, newOwner);
+      assert.equal((await etoken2.owner.call(SYMBOL)).valueOf(), newOwner);
+      assert.equal((await etoken2.owner.call(symbol2)).valueOf(), OWNER);
     });
   });
 
-  it('should be possible to check is locked', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.isLocked.call(SYMBOL);
-    }).then(result => {
-      assert.isFalse(result);
+  describe('Transfer', () => {
+    it('should not be possible to transfer missing asset', async () => {
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, amount, NON_ASSET);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, NON_ASSET)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, NON_ASSET)).valueOf(), 0);
+    });
+
+    it('should not be possible to transfer amount 1 with balance 0', async () => {
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, VALUE, SYMBOL);
+      await etoken2.transfer(NON_OWNER, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should not be possible to transfer amount 2 with balance 1', async () => {
+      const value = 1;
+      const amount = 2;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), value);
+    });
+
+    it('should not be possible to transfer amount (2**256 - 1) with balance (2**256 - 2)', async () => {
+      const value = UINT_256_MINUS_2;
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(NON_OWNER, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should not be possible to transfer amount 0', async () => {
+      const amount = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.transfer(NON_OWNER, amount, SYMBOL);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(NON_OWNER, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should not be possible to transfer to oneself', async () => {
+      const amount = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.transfer(OWNER, amount, SYMBOL);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(OWNER, SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should not be possible to transfer amount (2**256 - 1) to holder with 1 balance', async () => {
+      // Situation is impossible due to impossibility to
+      // issue more than (2**256 - 1) tokens for the asset.
+    });
+
+    it('should not be possible to transfer amount 1 to holder with (2**256 - 1) balance', async () => {
+      // Situation is impossible due to impossibility
+      // to issue more than (2**256 - 1) tokens for the asset.
+    });
+
+    it('should not be possible to transfer amount 2**255 to holder with 2**255 balance', async () => {
+      // Situation is impossible due to impossibility to
+      // issue more than (2**256 - 1) tokens for the asset.
+    });
+
+    it('should be possible to transfer amount 2**255 to holder with (2**255 - 1) balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const amount = UINT_255;
+      const balance2 = UINT_255_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, balance2, SYMBOL);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to transfer amount (2**255 - 1) to holder with 2**255 balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const amount = UINT_255_MINUS_1;
+      const balance2 = UINT_255;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, balance2, SYMBOL);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to transfer amount (2**256 - 2) to holder with 1 balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const amount = UINT_256_MINUS_2;
+      const balance2 = 1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, balance2, SYMBOL);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to transfer amount 1 to holder with (2**256 - 2) balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const amount = 1;
+      const balance2 = UINT_256_MINUS_2;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, balance2, SYMBOL);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        value.toString());
+      assert.equal((await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to transfer amount 1 to existing holder with 0 balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, VALUE, SYMBOL);
+      await etoken2.transfer(holder, amount, SYMBOL, {from: holder2});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), amount);
+    });
+
+    it('should be possible to transfer amount 1 to missing holder', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(), amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        VALUE - amount);
+    });
+
+    it('should be possible to transfer amount 1 to holder with non-zero balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const balance2 = 100;
+      const amount = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, balance2, SYMBOL);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        balance2 + amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        VALUE - balance2 - amount);
+    });
+
+    it('should be possible to transfer amount (2**256 - 1) to existing holder with 0 balance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, amount, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      await etoken2.transfer(holder, amount, SYMBOL, {from: holder2});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        amount.toString());
+    });
+
+    it('should be possible to transfer amount (2**256 - 1) to missing holder', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const amount = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, amount, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(holder2, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(),
+        amount.toString());
+      assert.equal((await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should keep transfers separated between assets', async () => {
+      const symbol2 = bytes32(200);
+      const value = 500;
+      const value2 = 1000;
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const amount = 100;
+      const amount2 = 33;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, value2, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      let result = getEvents(await etoken2.transfer(holder2, amount, SYMBOL));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.to.valueOf(), holder2);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), amount);
+      assert.equal(result[0].args.ref, '');
+      result = getEvents(await etoken2.transfer(holder2, amount2, symbol2));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.to.valueOf(), holder2);
+      assert.equal(result[0].args.symbol.valueOf(), symbol2);
+      assert.equal(result[0].args.value.valueOf(), amount2);
+      assert.equal(result[0].args.ref, '');
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        value - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(), amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, symbol2)).valueOf(),
+        value2 - amount2);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, symbol2)).valueOf(), amount2);
+    });
+
+    it('should be possible to do transfer with reference', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const reference = 'Invoice#AS001';
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = getEvents(
+        await etoken2.transferWithReference(holder2, VALUE, SYMBOL, reference));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.to.valueOf(), holder2);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), VALUE);
+      assert.equal(result[0].args.ref, reference);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder2, SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
     });
   });
-  it('should be possible to lock asset', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.lockAsset(SYMBOL);
-    }).then(() => {
-      return etoken2.isLocked.call(SYMBOL);
-    }).then(result => {
-      assert.isTrue(result);
+
+  describe('Allowance transfer', () => {
+    it('should not be possible to do allowance transfer by not allowed existing spender, from existing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 100;
+      const expectedSpenderBalance = 100;
+      const expectedHolderBalance = VALUE - value;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, value, SYMBOL);
+      await etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+    });
+
+    it('should not be possible to do allowance transfer by not allowed existing spender, from missing holder', async () => {
+      const holder = accounts[2];
+      const spender = accounts[1];
+      const value = 100;
+      const expectedSpenderBalance = 100;
+      const expectedHolderBalance = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, value, SYMBOL);
+      await etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+    });
+
+    it('should not be possible to do allowance transfer by not allowed missing spender, from existing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const expectedSpenderBalance = 0;
+      const expectedHolderBalance = VALUE;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transferFrom(
+        holder, spender, 50, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+    });
+
+    it('should not be possible to do allowance transfer by not allowed missing spender, from missing holder', async () => {
+      const holder = accounts[2];
+      const spender = accounts[1];
+      const expectedSpenderBalance = 0;
+      const expectedHolderBalance = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transferFrom(holder, spender, 50, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+    });
+
+    it('should not be possible to do allowance transfer from and to the same holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, 50, SYMBOL);
+      const result = await etoken2.transferFrom(
+        holder, holder, 50, SYMBOL, {from: spender});
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should be possible to do allowance transfer from oneself', async () => {
+      const holder = accounts[0];
+      const receiver = accounts[1];
+      const amount = 50;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transferFrom(holder, receiver, amount, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        VALUE - amount);
+      assert.equal(
+        (await etoken2.balanceOf.call(receiver, SYMBOL)).valueOf(), amount);
+    });
+
+    it('should not be possible to do allowance transfer with 0 value', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 0;
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, 100, SYMBOL);
+      const result = await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      await assertError(result);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), VALUE);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+    });
+
+    it('should not be possible to do allowance transfer with value less than balance, more than allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 1000;
+      const value = 999;
+      const allowed = 998;
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+    });
+
+    it('should not be possible to do allowance transfer with value equal to balance, more than allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 1000;
+      const value = 1000;
+      const allowed = 999;
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+    });
+
+    it('should not be possible to do allowance transfer with value more than balance, less than allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 199;
+      const value = 200;
+      const allowed = 201;
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+    });
+
+    it('should not be possible to do allowance transfer with value less than balance, more than allowed after another tranfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 102;
+      const anotherValue = 10;
+      const value = 91;
+      const allowed = 100;
+      const expectedHolderBalance = balance - anotherValue;
+      const resultValue = anotherValue;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, anotherValue, SYMBOL, {from: spender});
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+    });
+
+    it('should not be possible to do allowance transfer with missing symbol when allowed for another symbol', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 1000;
+      const value = 200;
+      const allowed = 1000;
+      const missingSymbol = bytes32(33);
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, missingSymbol, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, missingSymbol)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, missingSymbol)).valueOf(), 0);
+    });
+
+    it('should not be possible to do allowance transfer when allowed for another symbol', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 1000;
+      const value = 200;
+      const allowed = 1000;
+      const symbol2 = bytes32(2);
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, symbol2, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, symbol2)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, symbol2)).valueOf(), 0);
+    });
+
+    it('should not be possible to do allowance transfer with missing symbol when not allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 1000;
+      const value = 200;
+      const missingSymbol = bytes32(33);
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transferFrom(
+        holder, spender, value, missingSymbol, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), balance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), resultValue);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, missingSymbol)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, missingSymbol)).valueOf(), 0);
+    });
+
+    it('should be possible to do allowance transfer by allowed existing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const existValue = 100;
+      const value = 300;
+      const expectedHolderBalance = VALUE - existValue - value;
+      const expectedSpenderBalance = existValue + value;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, existValue, SYMBOL);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+    });
+
+    it('should be possible to do allowance transfer by allowed missing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 300;
+      const expectedHolderBalance = VALUE - value;
+      const expectedSpenderBalance = value;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+    });
+
+    it('should be possible to do allowance transfer to oneself', async () => {
+      // Covered by 'should be possible to do
+      // allowance transfer by allowed existing spender'.
+    });
+
+    it('should be possible to do allowance transfer to existing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const receiver = accounts[2];
+      const existValue = 100;
+      const value = 300;
+      const expectedHolderBalance = VALUE - existValue - value;
+      const expectedReceiverBalance = existValue + value;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(receiver, existValue, SYMBOL);
+      await etoken2.approve(spender, value, SYMBOL);
+      const result = getEvents(
+        await etoken2.transferFrom(
+          holder, receiver, value, SYMBOL, {from: spender}));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.to.valueOf(), receiver);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), value);
+      assert.equal(result[0].args.ref, '');
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(receiver, SYMBOL)).valueOf(),
+        expectedReceiverBalance);
+    });
+
+    it('should be possible to do allowance transfer to missing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const receiver = accounts[2];
+      const value = 300;
+      const expectedHolderBalance = VALUE - value;
+      const expectedReceiverBalance = value;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, receiver, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(receiver, SYMBOL)).valueOf(),
+        expectedReceiverBalance);
+    });
+
+    it('should be possible to do allowance transfer with value less than balance and less than allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 201;
+      const value = 200;
+      const allowed = 201;
+      const expectedHolderBalance = balance - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to do allowance transfer with value less than balance and equal to allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 201;
+      const value = 200;
+      const allowed = 200;
+      const expectedHolderBalance = balance - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to do allowance transfer with value equal to balance and less than allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 200;
+      const value = 200;
+      const allowed = 201;
+      const expectedHolderBalance = balance - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to do allowance transfer with value equal to balance and equal to allowed', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 200;
+      const value = 200;
+      const allowed = 200;
+      const expectedHolderBalance = balance - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to do allowance transfer with value less than balance and less than allowed after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 201;
+      const anotherValue = 1;
+      const value = 199;
+      const allowed = 201;
+      const expectedSpenderBalance = anotherValue + value;
+      const expectedHolderBalance = balance - anotherValue - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, anotherValue, SYMBOL, {from: spender});
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+    });
+
+    it('should be possible to do allowance transfer with value less than balance and equal to allowed after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const balance = 201;
+      const anotherValue = 1;
+      const value = 199;
+      const allowed = 200;
+      const expectedSpenderBalance = anotherValue + value;
+      const expectedHolderBalance = balance - anotherValue - value;
+      await etoken2.issueAsset(
+        SYMBOL, balance, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, allowed, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, anotherValue, SYMBOL, {from: spender});
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        expectedSpenderBalance);
+    });
+
+    it('should be possible to do allowance transfer with value (2**256 - 1)', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(), 0);
+      assert.equal(
+        (await etoken2.balanceOf.call(spender, SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should be possible to do allowance transfer with reference', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const receiver = accounts[2];
+      const value = 300;
+      const expectedHolderBalance = VALUE - value;
+      const expectedReceiverBalance = value;
+      const reference = 'just some arbitrary string.';
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      const result = getEvents(
+        await etoken2.transferFromWithReference(
+          holder, receiver, value, SYMBOL, reference, {from: spender}));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.to.valueOf(), receiver);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), value);
+      assert.equal(result[0].args.ref, reference);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        expectedHolderBalance);
+      assert.equal(
+        (await etoken2.balanceOf.call(receiver, SYMBOL)).valueOf(),
+        expectedReceiverBalance);
+    });
+
+    it('should await 0 allowance after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 300;
+      const resultValue = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, value, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        resultValue);
+    });
+
+    it('should await 1 allowance after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const receiver = accounts[2];
+      const value = 300;
+      const transfer = 299;
+      const resultValue = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, receiver, transfer, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        resultValue);
+    });
+
+    it('should await 2**255 allowance after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const transfer = UINT_255_MINUS_1;
+      const resultValue = UINT_255;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, transfer, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        resultValue.toString());
+    });
+
+    it('should await (2**256 - 2) allowance after another transfer', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = UINT_256_MINUS_1;
+      const transfer = 1;
+      const resultValue = UINT_256_MINUS_2;
+      await etoken2.issueAsset(
+        SYMBOL, value, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.transferFrom(
+        holder, spender, transfer, SYMBOL, {from: spender});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        resultValue.toString());
     });
   });
-  it('should not be possible to change asset after lock', () => {
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.lockAsset(SYMBOL);
-    }).then(() => {
-      return etoken2.changeAsset(SYMBOL, 'New name', 'New description', 100);
-    }).then(() => {
-      return etoken2.name.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), NAME);
-      return etoken2.description.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), DESCRIPTION);
-      return etoken2.baseUnit.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), BASE_UNIT);
+
+  describe('Allowance', () => {
+    it('should not be possible to set allowance for missing symbol', async () => {
+      const spender = accounts[1];
+      const missingSymbol = bytes32(33);
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.approve(spender, 100, missingSymbol);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.allowance.call(OWNER, spender, missingSymbol)).valueOf(),
+        0);
+    });
+
+    it('should not be possible to set allowance for missing symbol for oneself', async () => {
+      const missingSymbol = bytes32(33);
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.approve(OWNER, 100, missingSymbol);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.allowance.call(OWNER, OWNER, missingSymbol)).valueOf(),
+        0);
+    });
+
+    it('should not be possible to set allowance for oneself', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = await etoken2.approve(OWNER, 100, SYMBOL);
+      await assertError(result);
+      assert.equal(
+        (await etoken2.allowance.call(OWNER, OWNER, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should be possible to set allowance from missing holder to missing holder', async () => {
+      const holder = accounts[1];
+      const spender = accounts[2];
+      const value = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = getEvents(
+        await etoken2.approve(spender, value, SYMBOL, {from: holder}));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].args.from.valueOf(), holder);
+      assert.equal(result[0].args.spender.valueOf(), spender);
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal(result[0].args.value.valueOf(), value);
+      assert.equal((await etoken2.allowance.call(
+        holder, spender, SYMBOL)).valueOf(), value);
+    });
+
+    it('should be possible to set allowance from missing holder to existing holder', async () => {
+      const holder = accounts[1];
+      const spender = accounts[0];
+      const value = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(
+        spender, value, SYMBOL, {from: holder});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to set allowance from existing holder to missing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[2];
+      const value = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(
+        spender, value, SYMBOL, {from: holder});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to set allowance from existing holder to existing holder', async () => {
+      const holder = accounts[0];
+      const spender = accounts[2];
+      const value = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, 1, SYMBOL, {from: holder});
+      await etoken2.approve(spender, value, SYMBOL, {from: holder});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to set allowance value 0', async () => {
+      // Covered by 'should be possible to
+      // override allowance value with 0 value'.
+    });
+
+    it('should be possible to set allowance with (2**256 - 1) value', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = UINT_256_MINUS_1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value.toString());
+    });
+
+    it('should be possible to set allowance value less then balance', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 1;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to set allowance value equal to balance', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = VALUE;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to set allowance value more then balance', async () => {
+      // Covered by 'should be possible to set
+      // allowance with (2**256 - 1) value'.
+    });
+
+    it('should be possible to override allowance value with 0 value', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 0;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, 100, SYMBOL);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to override allowance value with non 0 value', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 1000;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, 100, SYMBOL);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should not affect balance when setting allowance', async () => {
+      const holder = accounts[0];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(accounts[1], 100, SYMBOL);
+      assert.equal(
+        (await etoken2.balanceOf.call(holder, SYMBOL)).valueOf(),
+        VALUE);
+    });
+
+    it('should be possible to set allowance', async () => {
+      // Covered by other tests above.
+    });
+
+    it('should await 0 allowance for existing owner and not allowed existing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, 100, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should await 0 allowance for existing owner and not allowed missing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should await 0 allowance for missing owner and existing spender', async () => {
+      const holder = accounts[1];
+      const spender = accounts[0];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        0);
+    });
+
+    it('should await 0 allowance for missing owner and missing spender', async () => {
+      const holder = accounts[1];
+      const spender = accounts[2];
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should await 0 allowance for existing oneself', async () => {
+      const holder = accounts[0];
+      const spender = holder;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should await 0 allowance for missing oneself', async () => {
+      const holder = accounts[1];
+      const spender = holder;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should await 0 allowance for missing symbol', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const missingSymbol = bytes32(33);
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(
+        spender, 100, SYMBOL);
+      assert.equal((await etoken2.allowance.call(
+        holder, spender, missingSymbol)).valueOf(), 0);
+    });
+
+    it('should respect symbol when telling allowance', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const symbol = SYMBOL;
+      const symbol2 = bytes32(2);
+      const value = 100;
+      const value2 = 200;
+      await etoken2.issueAsset(
+        symbol, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.issueAsset(
+        symbol2, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, symbol);
+      await etoken2.approve(spender, value2, symbol2);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, symbol)).valueOf(),
+        value);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, symbol2)).valueOf(),
+        value2);
+    });
+
+    it('should respect holder when telling allowance', async () => {
+      const holder = accounts[0];
+      const holder2 = accounts[1];
+      const spender = accounts[2];
+      const value = 100;
+      const value2 = 200;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.approve(spender, value2, SYMBOL, {from: holder2});
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+      assert.equal(
+        (await etoken2.allowance.call(holder2, spender, SYMBOL)).valueOf(),
+        value2);
+    });
+
+    it('should respect spender when telling allowance', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const spender2 = accounts[2];
+      const value = 100;
+      const value2 = 200;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      await etoken2.approve(spender2, value2, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender2, SYMBOL)).valueOf(),
+        value2);
+    });
+
+    it('should be possible to check allowance of existing owner and allowed existing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 300;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.transfer(spender, 100, SYMBOL);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
+    });
+
+    it('should be possible to check allowance of existing owner and allowed missing spender', async () => {
+      const holder = accounts[0];
+      const spender = accounts[1];
+      const value = 300;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.approve(spender, value, SYMBOL);
+      assert.equal(
+        (await etoken2.allowance.call(holder, spender, SYMBOL)).valueOf(),
+        value);
     });
   });
-  it('should be possible to change asset before lock', () => {
-    const newName = 'New name';
-    const newDescription = 'New description';
-    const newBaseUnit = 100;
-    return etoken2.issueAsset(SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, IS_REISSUABLE).then(() => {
-      return etoken2.changeAsset(SYMBOL, newName, newDescription, newBaseUnit);
-    }).then(tx => getEvents(tx, 'Change')).then(events => {
-      assert.equal(events.length, 1);
-      assert.equal(events[0].args.symbol.valueOf(), SYMBOL);
-      return etoken2.name.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), newName);
-      return etoken2.description.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), newDescription);
-      return etoken2.baseUnit.call(SYMBOL);
-    }).then(result => {
-      assert.equal(result.valueOf(), newBaseUnit);
+
+  describe('Proxy', () => {
+    it('should allow transfer froms from user contracts', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true, {from: accounts[1]});
+      await etoken2.approve(
+        userContract.address, VALUE, SYMBOL, {from: accounts[1]});
+      await userContract.transferFromWithReference(
+        accounts[1], accounts[2], VALUE, SYMBOL, '');
+      assert.equal((await etoken2.balanceOf(
+        accounts[1], SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.balanceOf(
+        accounts[2], SYMBOL)).valueOf(), VALUE);
+      assert.equal((await etoken2.allowance(
+        accounts[1], userContract.address, SYMBOL)).valueOf(), 0);
+    });
+
+    it('should allow approves from user contracts', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true);
+      await userContract.approve(
+        accounts[1], VALUE, SYMBOL);
+      assert.equal((await etoken2.allowance(
+        userContract.address, accounts[1], SYMBOL)).valueOf(), VALUE);
+    });
+
+    it('should allow transfers from to ICAP from user contracts', async () => {
+      const _icap = web3.utils.fromAscii('XE73TSTXREG123456789');
+      const icap = await RegistryICAPTestable.new();
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, true);
+      await etoken2.setupRegistryICAP(icap.address);
+      await icap.registerAsset('TST', SYMBOL);
+      await icap.registerInstitution('XREG', accounts[2]);
+      await icap.registerInstitutionAsset(
+        'TST', 'XREG', accounts[2], {from: accounts[2]});
+      await etoken2.approve(userContract.address, VALUE, SYMBOL);
+      await userContract.transferFromToICAPWithReference(
+        accounts[0], _icap, VALUE, '');
+      assert.equal((await etoken2.balanceOf(
+        accounts[0], SYMBOL)).valueOf(), 0);
+      assert.equal((await etoken2.balanceOf(
+        accounts[2], SYMBOL)).valueOf(), VALUE);
+    });
+  });
+
+  describe('ICAP', () => {
+    it('should be possible to do transfer to ICAP', async () => {
+      const _icap = web3.utils.fromAscii('XE73TSTXREG123456789');
+      const icap = await RegistryICAPTestable.new();
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.setupRegistryICAP(icap.address);
+      await icap.registerAsset('TST', SYMBOL);
+      await icap.registerInstitution('XREG', accounts[2]);
+      await icap.registerInstitutionAsset(
+        'TST', 'XREG', accounts[2], {from: accounts[2]});
+      const result = getEvents(await etoken2.transferToICAP(_icap, 100));
+      assert.equal(result.length, 2);
+      assert.equal(result[1].event, 'TransferToICAP');
+      assert.equal(result[1].args.from.valueOf(), accounts[0]);
+      assert.equal(result[1].args.to.valueOf(), accounts[2]);
+      assert.equal(
+        result[1].args.icap.valueOf().substr(0, 42), _icap);
+      assert.equal(result[1].args.value, 100);
+      assert.equal(result[1].args.ref, '');
+      assert.equal(
+        (await etoken2.balanceOf(accounts[2], SYMBOL)).valueOf(), 100);
+      assert.equal(
+        (await etoken2.balanceOf(accounts[0], SYMBOL)).valueOf(), VALUE-100);
+    });
+
+    it('should be possible to do transfer to ICAP with reference', async () => {
+      const _icap = web3.utils.fromAscii('XE73TSTXREG123456789');
+      const icap = await RegistryICAPTestable.new();
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.setupRegistryICAP(icap.address);
+      await icap.registerAsset('TST', SYMBOL);
+      await icap.registerInstitution('XREG', accounts[2]);
+      await icap.registerInstitutionAsset(
+        'TST', 'XREG', accounts[2], {from: accounts[2]});
+      const result = getEvents(
+        await etoken2.transferToICAPWithReference(_icap, 100, 'Ref'));
+      assert.equal(result.length, 2);
+      assert.equal(result[1].event, 'TransferToICAP');
+      assert.equal(result[1].args.from.valueOf(), accounts[0]);
+      assert.equal(result[1].args.to.valueOf(), accounts[2]);
+      assert.equal(
+        result[1].args.icap.valueOf().substr(0, 42), _icap);
+      assert.equal(result[1].args.value, 100);
+      assert.equal(result[1].args.ref, 'Ref');
+      assert.equal(
+        (await etoken2.balanceOf(accounts[2], SYMBOL)).valueOf(), 100);
+      assert.equal(
+        (await etoken2.balanceOf(accounts[0], SYMBOL)).valueOf(), VALUE-100);
+    });
+
+    it('should be possible to do transfer from to ICAP', async () => {
+      const _icap = web3.utils.fromAscii('XE73TSTXREG123456789');
+      const icap = await RegistryICAPTestable.new();
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.setupRegistryICAP(icap.address);
+      await icap.registerAsset('TST', SYMBOL);
+      await icap.registerInstitution('XREG', accounts[2]);
+      await icap.registerInstitutionAsset(
+        'TST', 'XREG', accounts[2], {from: accounts[2]});
+      await etoken2.approve(accounts[1], 200, SYMBOL);
+      const result = getEvents(
+        await etoken2.transferFromToICAP(
+          accounts[0], _icap, 100, {from: accounts[1]}));
+      assert.equal(result.length, 2);
+      assert.equal(result[1].event, 'TransferToICAP');
+      assert.equal(result[1].args.from.valueOf(), accounts[0]);
+      assert.equal(result[1].args.to.valueOf(), accounts[2]);
+      assert.equal(
+        result[1].args.icap.valueOf().substr(0, 42), _icap);
+      assert.equal(result[1].args.value, 100);
+      assert.equal(result[1].args.ref, '');
+      assert.equal(
+        (await etoken2.balanceOf(accounts[2], SYMBOL)).valueOf(), 100);
+      assert.equal(
+        (await etoken2.balanceOf(accounts[0], SYMBOL)).valueOf(), VALUE-100);
+      assert.equal(
+        (await etoken2.allowance(accounts[0], accounts[1], SYMBOL)).valueOf(),
+        100);
+    });
+
+    it('should be possible to do transfer from to ICAP with reference', async () => {
+      const _icap = web3.utils.fromAscii('XE73TSTXREG123456789');
+      const icap = await RegistryICAPTestable.new();
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.setupRegistryICAP(icap.address);
+      await icap.registerAsset('TST', SYMBOL);
+      await icap.registerInstitution('XREG', accounts[2]);
+      await icap.registerInstitutionAsset(
+        'TST', 'XREG', accounts[2], {from: accounts[2]});
+      await etoken2.approve(accounts[1], 200, SYMBOL);
+      const result = getEvents(
+        await etoken2.transferFromToICAPWithReference(
+          accounts[0], _icap, 100, 'Ref', {from: accounts[1]}));
+      assert.equal(result.length, 2);
+      assert.equal(result[1].event, 'TransferToICAP');
+      assert.equal(result[1].args.from.valueOf(), accounts[0]);
+      assert.equal(result[1].args.to.valueOf(), accounts[2]);
+      assert.equal(
+        result[1].args.icap.valueOf().substr(0, 42), _icap);
+      assert.equal(result[1].args.value, 100);
+      assert.equal(result[1].args.ref, 'Ref');
+      assert.equal(
+        (await etoken2.balanceOf(accounts[2], SYMBOL)).valueOf(), 100);
+      assert.equal(
+        (await etoken2.balanceOf(accounts[0], SYMBOL)).valueOf(), VALUE-100);
+      assert.equal(
+        (await etoken2.allowance(accounts[0], accounts[1], SYMBOL)).valueOf(),
+        100);
+    });
+  });
+
+  describe('Lock asset', () => {
+    it('should be possible to check is locked', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      assert.isFalse(await etoken2.isLocked.call(SYMBOL));
+    });
+
+    it('should be possible to lock asset', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.lockAsset(SYMBOL);
+      assert.isTrue(await etoken2.isLocked.call(SYMBOL));
+    });
+
+    it('should not be possible to change asset after lock', async () => {
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      await etoken2.lockAsset(SYMBOL);
+      await etoken2.changeAsset(SYMBOL, 'New name', 'New description', 100);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), NAME);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), DESCRIPTION);
+      assert.equal((await etoken2.baseUnit.call(SYMBOL)).valueOf(), BASE_UNIT);
+    });
+
+    it('should be possible to change asset before lock', async () => {
+      const newName = 'New name';
+      const newDescription = 'New description';
+      const newBaseUnit = 100;
+      await etoken2.issueAsset(
+        SYMBOL, VALUE, NAME, DESCRIPTION, BASE_UNIT, NOT_REISSUABLE);
+      const result = getEvents(
+        await etoken2.changeAsset(
+          SYMBOL, newName, newDescription, newBaseUnit));
+      assert.equal(result.length, 1);
+      assert.equal(result[0].event, 'Change');
+      assert.equal(result[0].args.symbol.valueOf(), SYMBOL);
+      assert.equal((await etoken2.name.call(SYMBOL)).valueOf(), newName);
+      assert.equal(
+        (await etoken2.description.call(SYMBOL)).valueOf(), newDescription);
+      assert.equal(
+        (await etoken2.baseUnit.call(SYMBOL)).valueOf(), newBaseUnit);
     });
   });
 });

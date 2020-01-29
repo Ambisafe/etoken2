@@ -1,16 +1,12 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
+pragma solidity 0.5.8;
 
-pragma solidity 0.4.8;
-
-import {EToken2Interface as EToken2} from './EToken2Interface.sol';
-import {AssetInterface as Asset} from './AssetInterface.sol';
-import {ERC20Interface as ERC20} from './ERC20Interface.sol';
+import './EToken2Interface.sol';
+import './AssetInterface.sol';
+import './ERC20Interface.sol';
 import './AssetProxyInterface.sol';
-import './helpers/Bytes32.sol';
+import '../dependencies/contracts/Bytes32.sol';
+import '../dependencies/contracts/ReturnData.sol';
+
 
 /**
  * @title EToken2 Asset Proxy.
@@ -40,9 +36,9 @@ import './helpers/Bytes32.sol';
  * Note: all the non constant functions return false instead of throwing in case if state change
  * didn't happen yet.
  */
-contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
+contract AssetProxy is ERC20Interface, AssetProxyInterface, Bytes32, ReturnData {
     // Assigned EToken2, immutable.
-    EToken2 public etoken2;
+    EToken2Interface public etoken2;
 
     // Assigned symbol, immutable.
     bytes32 public etoken2Symbol;
@@ -62,8 +58,10 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function init(EToken2 _etoken2, string _symbol, string _name) returns(bool) {
-        if (address(etoken2) != 0x0) {
+    function init(EToken2Interface _etoken2, string memory _symbol, string memory _name)
+        public returns(bool)
+    {
+        if (address(etoken2) != address(0)) {
             return false;
         }
         etoken2 = _etoken2;
@@ -96,12 +94,22 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset implementation contract.
      */
-    function _getAsset() internal returns(Asset) {
-        return Asset(getVersionFor(msg.sender));
+    function _getAsset() internal view returns(AssetInterface) {
+        return AssetInterface(getVersionFor(msg.sender));
     }
 
-    function recoverTokens(uint _value) onlyAssetOwner() returns(bool) {
-        return this.transferWithReference(msg.sender, _value, 'Tokens recovery');
+    /**
+     * Recovers tokens on proxy contract
+     *
+     * @param _asset type of tokens to recover.
+     * @param _value tokens that will be recovered.
+     * @param _receiver address where to send recovered tokens.
+     *
+     * @return success.
+     */
+    function recoverTokens(ERC20Interface _asset, address _receiver, uint _value)
+    public onlyAssetOwner() returns(bool) {
+        return _asset.transfer(_receiver, _value);
     }
 
     /**
@@ -109,7 +117,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset total supply.
      */
-    function totalSupply() constant returns(uint) {
+    function totalSupply() public view returns(uint) {
         return etoken2.totalSupply(etoken2Symbol);
     }
 
@@ -120,7 +128,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return holder balance.
      */
-    function balanceOf(address _owner) constant returns(uint) {
+    function balanceOf(address _owner) public view returns(uint) {
         return etoken2.balanceOf(_owner, etoken2Symbol);
     }
 
@@ -132,7 +140,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return holder to spender allowance.
      */
-    function allowance(address _from, address _spender) constant returns(uint) {
+    function allowance(address _from, address _spender) public view returns(uint) {
         return etoken2.allowance(_from, _spender, etoken2Symbol);
     }
 
@@ -141,7 +149,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset decimals.
      */
-    function decimals() constant returns(uint8) {
+    function decimals() public view returns(uint8) {
         return etoken2.baseUnit(etoken2Symbol);
     }
 
@@ -153,7 +161,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transfer(address _to, uint _value) returns(bool) {
+    function transfer(address _to, uint _value) public returns(bool) {
         return transferWithReference(_to, _value, '');
     }
 
@@ -168,8 +176,10 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferWithReference(address _to, uint _value, string _reference) returns(bool) {
-        return _getAsset()._performTransferWithReference(_to, _value, _reference, msg.sender);
+    function transferWithReference(address _to, uint _value, string memory _reference)
+    public returns(bool) {
+        return _getAsset()._performTransferWithReference(
+            _to, _value, _reference, msg.sender);
     }
 
     /**
@@ -180,7 +190,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferToICAP(bytes32 _icap, uint _value) returns(bool) {
+    function transferToICAP(bytes32 _icap, uint _value) public returns(bool) {
         return transferToICAPWithReference(_icap, _value, '');
     }
 
@@ -195,8 +205,13 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferToICAPWithReference(bytes32 _icap, uint _value, string _reference) returns(bool) {
-        return _getAsset()._performTransferToICAPWithReference(_icap, _value, _reference, msg.sender);
+    function transferToICAPWithReference(
+        bytes32 _icap,
+        uint _value,
+        string memory _reference)
+    public returns(bool) {
+        return _getAsset()._performTransferToICAPWithReference(
+            _icap, _value, _reference, msg.sender);
     }
 
     /**
@@ -208,7 +223,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferFrom(address _from, address _to, uint _value) returns(bool) {
+    function transferFrom(address _from, address _to, uint _value) public returns(bool) {
         return transferFromWithReference(_from, _to, _value, '');
     }
 
@@ -224,8 +239,19 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferFromWithReference(address _from, address _to, uint _value, string _reference) returns(bool) {
-        return _getAsset()._performTransferFromWithReference(_from, _to, _value, _reference, msg.sender);
+    function transferFromWithReference(
+        address _from,
+        address _to,
+        uint _value,
+        string memory _reference)
+    public returns(bool) {
+        return _getAsset()._performTransferFromWithReference(
+            _from,
+            _to,
+            _value,
+            _reference,
+            msg.sender
+        );
     }
 
     /**
@@ -241,8 +267,21 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function _forwardTransferFromWithReference(address _from, address _to, uint _value, string _reference, address _sender) onlyImplementationFor(_sender) returns(bool) {
-        return etoken2.proxyTransferFromWithReference(_from, _to, _value, etoken2Symbol, _reference, _sender);
+    function _forwardTransferFromWithReference(
+        address _from,
+        address _to,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyImplementationFor(_sender) returns(bool) {
+        return etoken2.proxyTransferFromWithReference(
+            _from,
+            _to,
+            _value,
+            etoken2Symbol,
+            _reference,
+            _sender
+        );
     }
 
     /**
@@ -254,7 +293,8 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferFromToICAP(address _from, bytes32 _icap, uint _value) returns(bool) {
+    function transferFromToICAP(address _from, bytes32 _icap, uint _value)
+    public returns(bool) {
         return transferFromToICAPWithReference(_from, _icap, _value, '');
     }
 
@@ -270,8 +310,19 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function transferFromToICAPWithReference(address _from, bytes32 _icap, uint _value, string _reference) returns(bool) {
-        return _getAsset()._performTransferFromToICAPWithReference(_from, _icap, _value, _reference, msg.sender);
+    function transferFromToICAPWithReference(
+        address _from,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference)
+    public returns(bool) {
+        return _getAsset()._performTransferFromToICAPWithReference(
+            _from,
+            _icap,
+            _value,
+            _reference,
+            msg.sender
+        );
     }
 
     /**
@@ -287,8 +338,20 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function _forwardTransferFromToICAPWithReference(address _from, bytes32 _icap, uint _value, string _reference, address _sender) onlyImplementationFor(_sender) returns(bool) {
-        return etoken2.proxyTransferFromToICAPWithReference(_from, _icap, _value, _reference, _sender);
+    function _forwardTransferFromToICAPWithReference(
+        address _from,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyImplementationFor(_sender) returns(bool) {
+        return etoken2.proxyTransferFromToICAPWithReference(
+            _from,
+            _icap,
+            _value,
+            _reference,
+            _sender
+        );
     }
 
     /**
@@ -301,7 +364,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function approve(address _spender, uint _value) returns(bool) {
+    function approve(address _spender, uint _value) public returns(bool) {
         return _getAsset()._performApprove(_spender, _value, msg.sender);
     }
 
@@ -316,7 +379,8 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function _forwardApprove(address _spender, uint _value, address _sender) onlyImplementationFor(_sender) returns(bool) {
+    function _forwardApprove(address _spender, uint _value, address _sender)
+    public onlyImplementationFor(_sender) returns(bool) {
         return etoken2.proxyApprove(_spender, _value, etoken2Symbol, _sender);
     }
 
@@ -325,8 +389,8 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * Can only be, and, called by assigned EToken2 when asset transfer happens.
      */
-    function emitTransfer(address _from, address _to, uint _value) onlyEToken2() {
-        Transfer(_from, _to, _value);
+    function emitTransfer(address _from, address _to, uint _value) public onlyEToken2() {
+        emit Transfer(_from, _to, _value);
     }
 
     /**
@@ -334,42 +398,68 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * Can only be, and, called by assigned EToken2 when asset allowance set happens.
      */
-    function emitApprove(address _from, address _spender, uint _value) onlyEToken2() {
-        Approval(_from, _spender, _value);
+    function emitApprove(address _from, address _spender, uint _value) public onlyEToken2() {
+        emit Approval(_from, _spender, _value);
     }
 
     /**
      * Resolves asset implementation contract for the caller and forwards there transaction data,
      * along with the value. This allows for proxy interface growth.
      */
-    function () payable {
-        bytes32 result = _getAsset()._performGeneric.value(msg.value)(msg.data, msg.sender);
-        assembly {
-            mstore(0, result)
-            return(0, 32)
-        }
+    function () external payable {
+        _getAsset()._performGeneric.value(msg.value)(msg.data, msg.sender);
+        _returnReturnData(true);
+    }
+
+    // Interface functions to allow specifying ICAP addresses as strings.
+    function transferToICAP(string memory _icap, uint _value) public returns(bool) {
+        return transferToICAPWithReference(_icap, _value, '');
+    }
+
+    function transferToICAPWithReference(string memory _icap, uint _value, string memory _reference)
+    public returns(bool) {
+        return transferToICAPWithReference(_bytes32(_icap), _value, _reference);
+    }
+
+    function transferFromToICAP(address _from, string memory _icap, uint _value)
+        public returns(bool)
+    {
+        return transferFromToICAPWithReference(_from, _icap, _value, '');
+    }
+
+    function transferFromToICAPWithReference(
+        address _from,
+        string memory _icap,
+        uint _value,
+        string memory _reference)
+    public returns(bool) {
+        return transferFromToICAPWithReference(_from, _bytes32(_icap), _value, _reference);
     }
 
     /**
      * Indicates an upgrade freeze-time start, and the next asset implementation contract.
      */
-    event UpgradeProposal(address newVersion);
+    event UpgradeProposed(address newVersion);
+    event UpgradePurged(address newVersion);
+    event UpgradeCommited(address newVersion);
+    event OptedOut(address sender, address version);
+    event OptedIn(address sender, address version);
 
     // Current asset implementation contract address.
-    address latestVersion;
+    address internal latestVersion;
 
     // Proposed next asset implementation contract address.
-    address pendingVersion;
+    address internal pendingVersion;
 
     // Upgrade freeze-time start.
-    uint pendingVersionTimestamp;
+    uint internal pendingVersionTimestamp;
 
     // Timespan for users to review the new implementation and make decision.
-    uint constant UPGRADE_FREEZE_TIME = 3 days;
+    uint internal constant UPGRADE_FREEZE_TIME = 3 days;
 
     // Asset implementation contract address that user decided to stick with.
     // 0x0 means that user uses latest version.
-    mapping(address => address) userOptOutVersion;
+    mapping(address => address) internal userOptOutVersion;
 
     /**
      * Only asset implementation contract assigned to sender is allowed to call.
@@ -387,8 +477,9 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset implementation contract address.
      */
-    function getVersionFor(address _sender) constant returns(address) {
-        return userOptOutVersion[_sender] == 0 ? latestVersion : userOptOutVersion[_sender];
+    function getVersionFor(address _sender) public view returns(address) {
+        return userOptOutVersion[_sender] == address(0) ?
+            latestVersion : userOptOutVersion[_sender];
     }
 
     /**
@@ -396,7 +487,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset implementation contract address.
      */
-    function getLatestVersion() constant returns(address) {
+    function getLatestVersion() public view returns(address) {
         return latestVersion;
     }
 
@@ -405,7 +496,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return asset implementation contract address.
      */
-    function getPendingVersion() constant returns(address) {
+    function getPendingVersion() public view returns(address) {
         return pendingVersion;
     }
 
@@ -414,7 +505,7 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return freeze-time start.
      */
-    function getPendingVersionTimestamp() constant returns(uint) {
+    function getPendingVersionTimestamp() public view returns(uint) {
         return pendingVersionTimestamp;
     }
 
@@ -429,23 +520,24 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function proposeUpgrade(address _newVersion) onlyAssetOwner() returns(bool) {
+    function proposeUpgrade(address _newVersion) public onlyAssetOwner() returns(bool) {
         // Should not already be in the upgrading process.
-        if (pendingVersion != 0x0) {
+        if (pendingVersion != address(0)) {
             return false;
         }
         // New version address should be other than 0x0.
-        if (_newVersion == 0x0) {
+        if (_newVersion == address(0)) {
             return false;
         }
         // Don't apply freeze-time for the initial setup.
-        if (latestVersion == 0x0) {
+        if (latestVersion == address(0)) {
             latestVersion = _newVersion;
             return true;
         }
         pendingVersion = _newVersion;
+        // solhint-disable-next-line not-rely-on-time
         pendingVersionTimestamp = now;
-        UpgradeProposal(_newVersion);
+        emit UpgradeProposed(_newVersion);
         return true;
     }
 
@@ -456,10 +548,11 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function purgeUpgrade() onlyAssetOwner() returns(bool) {
-        if (pendingVersion == 0x0) {
+    function purgeUpgrade() public onlyAssetOwner() returns(bool) {
+        if (pendingVersion == address(0)) {
             return false;
         }
+        emit UpgradePurged(pendingVersion);
         delete pendingVersion;
         delete pendingVersionTimestamp;
         return true;
@@ -472,16 +565,18 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function commitUpgrade() returns(bool) {
-        if (pendingVersion == 0x0) {
+    function commitUpgrade() public returns(bool) {
+        if (pendingVersion == address(0)) {
             return false;
         }
+        // solhint-disable-next-line not-rely-on-time
         if (pendingVersionTimestamp + UPGRADE_FREEZE_TIME > now) {
             return false;
         }
         latestVersion = pendingVersion;
         delete pendingVersion;
         delete pendingVersionTimestamp;
+        emit UpgradeCommited(latestVersion);
         return true;
     }
 
@@ -491,11 +586,12 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function optOut() returns(bool) {
-        if (userOptOutVersion[msg.sender] != 0x0) {
+    function optOut() public returns(bool) {
+        if (userOptOutVersion[msg.sender] != address(0)) {
             return false;
         }
         userOptOutVersion[msg.sender] = latestVersion;
+        emit OptedOut(msg.sender, latestVersion);
         return true;
     }
 
@@ -505,13 +601,14 @@ contract AssetProxy is ERC20, AssetProxyInterface, Bytes32 {
      *
      * @return success.
      */
-    function optIn() returns(bool) {
+    function optIn() public returns(bool) {
         delete userOptOutVersion[msg.sender];
+        emit OptedIn(msg.sender, latestVersion);
         return true;
     }
 
     // Backwards compatibility.
-    function multiAsset() constant returns(EToken2) {
+    function multiAsset() public view returns(EToken2Interface) {
         return etoken2;
     }
 }

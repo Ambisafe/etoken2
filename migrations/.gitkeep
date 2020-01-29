@@ -1,0 +1,1 @@
+# `migrations` directory is needed for truffle to work, though we don't use it.

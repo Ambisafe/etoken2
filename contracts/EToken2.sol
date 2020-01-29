@@ -1,29 +1,41 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
-
-pragma solidity 0.4.8;
+pragma solidity 0.5.8;
 
 import './Ambi2EnabledFull.sol';
 import './EToken2Interface.sol';
 
+
 contract Emitter {
-    function emitTransfer(address _from, address _to, bytes32 _symbol, uint _value, string _reference);
-    function emitTransferToICAP(address _from, address _to, bytes32 _icap, uint _value, string _reference);
-    function emitIssue(bytes32 _symbol, uint _value, address _by);
-    function emitRevoke(bytes32 _symbol, uint _value, address _by);
-    function emitOwnershipChange(address _from, address _to, bytes32 _symbol);
-    function emitApprove(address _from, address _spender, bytes32 _symbol, uint _value);
-    function emitError(bytes32 _message);
-    function emitChange(bytes32 _symbol);
+
+    function emitTransfer(
+        address _from,
+        address _to,
+        bytes32 _symbol,
+        uint _value,
+        string memory _reference)
+    public;
+
+    function emitTransferToICAP(
+        address _from,
+        address _to,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference)
+    public;
+
+    function emitIssue(bytes32 _symbol, uint _value, address _by) public;
+    function emitRevoke(bytes32 _symbol, uint _value, address _by) public;
+    function emitOwnershipChange(address _from, address _to, bytes32 _symbol) public;
+    function emitApprove(address _from, address _spender, bytes32 _symbol, uint _value) public;
+    function emitError(bytes32 _message) public;
+    function emitChange(bytes32 _symbol) public;
 }
 
+
 contract Proxy {
-    function emitTransfer(address _from, address _to, uint _value);
-    function emitApprove(address _from, address _spender, uint _value);
+    function emitTransfer(address _from, address _to, uint _value) public;
+    function emitApprove(address _from, address _spender, uint _value) public;
 }
+
 
 /**
  * @title EToken2.
@@ -40,7 +52,7 @@ contract Proxy {
  * Note: all the non constant functions return false instead of throwing in case if state change
  * didn't happen yet.
  */
-contract EToken2 is EToken2Interface, Ambi2EnabledFull {
+contract EToken2 is Ambi2EnabledFull {
     // Structure of a particular asset.
     struct Asset {
         uint owner;                       // Asset's owner id.
@@ -64,7 +76,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
     mapping(uint => address) public holders;
 
     // This is an access address mapping. Many addresses may have access to a single holder.
-    mapping(address => uint) holderIndex;
+    mapping(address => uint) public holderIndex;
 
     // Asset symbol to asset mapping.
     mapping(bytes32 => Asset) public assets;
@@ -98,8 +110,8 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function setupEventsHistory(Emitter _eventsHistory) onlyRole('setup') returns(bool) {
-        if (address(eventsHistory) != 0) {
+    function setupEventsHistory(Emitter _eventsHistory) public onlyRole('setup') returns(bool) {
+        if (address(eventsHistory) != address(0)) {
             return false;
         }
         eventsHistory = _eventsHistory;
@@ -115,8 +127,9 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function setupRegistryICAP(RegistryICAPInterface _registryICAP) onlyRole('setup') returns(bool) {
-        if (address(registryICAP) != 0) {
+    function setupRegistryICAP(RegistryICAPInterface _registryICAP)
+    public onlyRole('setup') returns(bool) {
+        if (address(registryICAP) != address(0)) {
             return false;
         }
         registryICAP = _registryICAP;
@@ -152,11 +165,11 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset existance.
      */
-    function isCreated(bytes32 _symbol) constant returns(bool) {
+    function isCreated(bytes32 _symbol) public view returns(bool) {
         return assets[_symbol].owner != 0;
     }
 
-    function isLocked(bytes32 _symbol) constant returns(bool) {
+    function isLocked(bytes32 _symbol) public view returns(bool) {
         return assets[_symbol].isLocked;
     }
 
@@ -167,7 +180,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset decimals.
      */
-    function baseUnit(bytes32 _symbol) constant returns(uint8) {
+    function baseUnit(bytes32 _symbol) public view returns(uint8) {
         return assets[_symbol].baseUnit;
     }
 
@@ -178,7 +191,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset name.
      */
-    function name(bytes32 _symbol) constant returns(string) {
+    function name(bytes32 _symbol) public view returns(string memory ) {
         return assets[_symbol].name;
     }
 
@@ -189,7 +202,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset description.
      */
-    function description(bytes32 _symbol) constant returns(string) {
+    function description(bytes32 _symbol) public view returns(string memory ) {
         return assets[_symbol].description;
     }
 
@@ -200,7 +213,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset reissuability.
      */
-    function isReissuable(bytes32 _symbol) constant returns(bool) {
+    function isReissuable(bytes32 _symbol) public view returns(bool) {
         return assets[_symbol].isReissuable;
     }
 
@@ -211,7 +224,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset owner address.
      */
-    function owner(bytes32 _symbol) constant returns(address) {
+    function owner(bytes32 _symbol) public view returns(address) {
         return holders[assets[_symbol].owner];
     }
 
@@ -223,7 +236,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return owner rights availability.
      */
-    function isOwner(address _owner, bytes32 _symbol) constant returns(bool) {
+    function isOwner(address _owner, bytes32 _symbol) public view returns(bool) {
         return isCreated(_symbol) && (assets[_symbol].owner == getHolderId(_owner));
     }
 
@@ -234,7 +247,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return asset total supply.
      */
-    function totalSupply(bytes32 _symbol) constant returns(uint) {
+    function totalSupply(bytes32 _symbol) public view returns(uint) {
         return assets[_symbol].totalSupply;
     }
 
@@ -246,7 +259,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder balance.
      */
-    function balanceOf(address _holder, bytes32 _symbol) constant returns(uint) {
+    function balanceOf(address _holder, bytes32 _symbol) public view returns(uint) {
         uint holderId = getHolderId(_holder);
         return holders[holderId] == _holder ? _balanceOf(holderId, _symbol) : 0;
     }
@@ -259,7 +272,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder balance.
      */
-    function _balanceOf(uint _holderId, bytes32 _symbol) constant internal returns(uint) {
+    function _balanceOf(uint _holderId, bytes32 _symbol) internal view returns(uint) {
         return assets[_symbol].wallets[_holderId].balance;
     }
 
@@ -270,11 +283,11 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder address.
      */
-    function _address(uint _holderId) constant internal returns(address) {
+    function _getAddress(uint _holderId) internal view returns(address) {
         return holders[_holderId];
     }
 
-    function _isProxy(bytes32 _symbol) constant internal returns(bool) {
+    function _isProxy(bytes32 _symbol) internal view returns(bool) {
         return proxies[_symbol] == msg.sender;
     }
 
@@ -288,8 +301,8 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function setProxy(address _address, bytes32 _symbol) onlyOwner(_symbol) returns(bool) {
-        if (proxies[_symbol] != 0x0 && assets[_symbol].isLocked) {
+    function setProxy(address _address, bytes32 _symbol) public onlyOwner(_symbol) returns(bool) {
+        if (proxies[_symbol] != address(0) && assets[_symbol].isLocked) {
             return false;
         }
         proxies[_symbol] = _address;
@@ -323,7 +336,14 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function _transfer(uint _fromId, uint _toId, uint _value, bytes32 _symbol, string _reference, uint _senderId) internal returns(bool) {
+    function _transfer(
+        uint _fromId,
+        uint _toId,
+        uint _value,
+        bytes32 _symbol,
+        string memory _reference,
+        uint _senderId)
+    internal returns(bool) {
         // Should not allow to send to oneself.
         if (_fromId == _toId) {
             _error('Cannot send to oneself');
@@ -351,14 +371,24 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         _transferDirect(_fromId, _toId, _value, _symbol);
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitTransfer(_address(_fromId), _address(_toId), _symbol, _value, _reference);
+        eventsHistory.emitTransfer(
+            _getAddress(_fromId), _getAddress(_toId), _symbol, _value, _reference);
         _proxyTransferEvent(_fromId, _toId, _value, _symbol);
         return true;
     }
 
     // Proxy check done internally due to unknown symbol when the function is called.
-    function _transferToICAP(uint _fromId, bytes32 _icap, uint _value, string _reference, uint _senderId) internal returns(bool) {
-        var (to, symbol, success) = registryICAP.parse(_icap);
+    function _transferToICAP(
+        uint _fromId,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        uint _senderId)
+    internal returns(bool) {
+        address to;
+        bytes32 symbol;
+        bool success;
+        (to, symbol, success) = registryICAP.parse(_icap);
         if (!success) {
             _error('ICAP is not registered');
             return false;
@@ -373,11 +403,18 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         }
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitTransferToICAP(_address(_fromId), _address(toId), _icap, _value, _reference);
+        eventsHistory.emitTransferToICAP(
+            _getAddress(_fromId), _getAddress(toId), _icap, _value, _reference);
         return true;
     }
 
-    function proxyTransferFromToICAPWithReference(address _from, bytes32 _icap, uint _value, string _reference, address _sender) returns(bool) {
+    function proxyTransferFromToICAPWithReference(
+        address _from,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public returns(bool) {
         return _transferToICAP(getHolderId(_from), _icap, _value, _reference, getHolderId(_sender));
     }
 
@@ -390,10 +427,10 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      * @param _symbol asset symbol.
      */
     function _proxyTransferEvent(uint _fromId, uint _toId, uint _value, bytes32 _symbol) internal {
-        if (proxies[_symbol] != 0x0) {
+        if (proxies[_symbol] != address(0)) {
             // Internal Out Of Gas/Throw: revert this transaction too;
             // Recursive Call: safe, all changes already made.
-            Proxy(proxies[_symbol]).emitTransfer(_address(_fromId), _address(_toId), _value);
+            Proxy(proxies[_symbol]).emitTransfer(_getAddress(_fromId), _getAddress(_toId), _value);
         }
     }
 
@@ -404,7 +441,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder id.
      */
-    function getHolderId(address _holder) constant returns(uint) {
+    function getHolderId(address _holder) public view returns(uint) {
         return holderIndex[_holder];
     }
 
@@ -443,7 +480,14 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function issueAsset(bytes32 _symbol, uint _value, string _name, string _description, uint8 _baseUnit, bool _isReissuable) onlyRole('issuance') returns(bool) {
+    function issueAsset(
+        bytes32 _symbol,
+        uint _value,
+        string memory _name,
+        string memory _description,
+        uint8 _baseUnit,
+        bool _isReissuable)
+    public onlyRole('issuance') returns(bool) {
         // Should have positive value if supply is going to be fixed.
         if (_value == 0 && !_isReissuable) {
             _error('Cannot issue 0 value fixed asset');
@@ -456,15 +500,21 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         }
         uint holderId = _createHolderId(msg.sender);
 
-        assets[_symbol] = Asset(holderId, _value, _name, _description, _isReissuable, _baseUnit, false);
+        assets[_symbol] = Asset(
+            holderId, _value, _name, _description, _isReissuable, _baseUnit, false);
         assets[_symbol].wallets[holderId].balance = _value;
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitIssue(_symbol, _value, _address(holderId));
+        eventsHistory.emitIssue(_symbol, _value, _getAddress(holderId));
         return true;
     }
 
-    function changeAsset(bytes32 _symbol, string _name, string _description, uint8 _baseUnit) onlyOwner(_symbol) returns(bool) {
+    function changeAsset(
+        bytes32 _symbol,
+        string memory _name,
+        string memory _description,
+        uint8 _baseUnit)
+    public onlyOwner(_symbol) returns(bool) {
         if (isLocked(_symbol)) {
             _error('Asset is locked');
             return false;
@@ -476,7 +526,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         return true;
     }
 
-    function lockAsset(bytes32 _symbol) onlyOwner(_symbol) returns(bool) {
+    function lockAsset(bytes32 _symbol) public onlyOwner(_symbol) returns(bool) {
         if (isLocked(_symbol)) {
             _error('Asset is locked');
             return false;
@@ -496,13 +546,13 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function reissueAsset(bytes32 _symbol, uint _value) onlyOwner(_symbol) returns(bool) {
+    function reissueAsset(bytes32 _symbol, uint _value) public onlyOwner(_symbol) returns(bool) {
         // Should have positive value.
         if (_value == 0) {
             _error('Cannot reissue 0 value');
             return false;
         }
-        Asset asset = assets[_symbol];
+        Asset storage asset = assets[_symbol];
         // Should have dynamic supply.
         if (!asset.isReissuable) {
             _error('Cannot reissue fixed asset');
@@ -518,7 +568,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         asset.totalSupply += _value;
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitIssue(_symbol, _value, _address(holderId));
+        eventsHistory.emitIssue(_symbol, _value, _getAddress(holderId));
         _proxyTransferEvent(0, holderId, _value, _symbol);
         return true;
     }
@@ -531,13 +581,13 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function revokeAsset(bytes32 _symbol, uint _value) returns(bool) {
+    function revokeAsset(bytes32 _symbol, uint _value) public returns(bool) {
         // Should have positive value.
         if (_value == 0) {
             _error('Cannot revoke 0 value');
             return false;
         }
-        Asset asset = assets[_symbol];
+        Asset storage asset = assets[_symbol];
         uint holderId = getHolderId(msg.sender);
         // Should have enough tokens.
         if (asset.wallets[holderId].balance < _value) {
@@ -548,7 +598,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         asset.totalSupply -= _value;
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitRevoke(_symbol, _value, _address(holderId));
+        eventsHistory.emitRevoke(_symbol, _value, _getAddress(holderId));
         _proxyTransferEvent(holderId, 0, _value, _symbol);
         return true;
     }
@@ -564,19 +614,20 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function changeOwnership(bytes32 _symbol, address _newOwner) onlyOwner(_symbol) returns(bool) {
-        Asset asset = assets[_symbol];
+    function changeOwnership(bytes32 _symbol, address _newOwner)
+    public onlyOwner(_symbol) returns(bool) {
+        Asset storage asset = assets[_symbol];
         uint newOwnerId = _createHolderId(_newOwner);
         // Should pass ownership to another holder.
         if (asset.owner == newOwnerId) {
             _error('Cannot pass ownership to oneself');
             return false;
         }
-        address oldOwner = _address(asset.owner);
+        address oldOwner = _getAddress(asset.owner);
         asset.owner = newOwnerId;
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitOwnershipChange(oldOwner, _address(newOwnerId), _symbol);
+        eventsHistory.emitOwnershipChange(oldOwner, _getAddress(newOwnerId), _symbol);
         return true;
     }
 
@@ -592,7 +643,12 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function _approve(uint _spenderId, uint _value, bytes32 _symbol, uint _senderId) internal returns(bool) {
+    function _approve(
+        uint _spenderId,
+        uint _value,
+        bytes32 _symbol,
+        uint _senderId)
+    internal returns(bool) {
         // Asset should exist.
         if (!isCreated(_symbol)) {
             _error('Asset is not issued');
@@ -606,11 +662,12 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
         assets[_symbol].wallets[_senderId].allowance[_spenderId] = _value;
         // Internal Out Of Gas/Throw: revert this transaction too;
         // Recursive Call: safe, all changes already made.
-        eventsHistory.emitApprove(_address(_senderId), _address(_spenderId), _symbol, _value);
-        if (proxies[_symbol] != 0x0) {
+        eventsHistory.emitApprove(_getAddress(_senderId), _getAddress(_spenderId), _symbol, _value);
+        if (proxies[_symbol] != address(0)) {
             // Internal Out Of Gas/Throw: revert this transaction too;
             // Recursive Call: safe, all changes already made.
-            Proxy(proxies[_symbol]).emitApprove(_address(_senderId), _address(_spenderId), _value);
+            Proxy(proxies[_symbol]).emitApprove(
+                _getAddress(_senderId), _getAddress(_spenderId), _value);
         }
         return true;
     }
@@ -627,7 +684,12 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function proxyApprove(address _spender, uint _value, bytes32 _symbol, address _sender) onlyProxy(_symbol) returns(bool) {
+    function proxyApprove(
+        address _spender,
+        uint _value,
+        bytes32 _symbol,
+        address _sender)
+    public onlyProxy(_symbol) returns(bool) {
         return _approve(_createHolderId(_spender), _value, _symbol, _createHolderId(_sender));
     }
 
@@ -640,7 +702,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder to spender allowance.
      */
-    function allowance(address _from, address _spender, bytes32 _symbol) constant returns(uint) {
+    function allowance(address _from, address _spender, bytes32 _symbol) public view returns(uint) {
         return _allowance(getHolderId(_from), getHolderId(_spender), _symbol);
     }
 
@@ -653,7 +715,7 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return holder to spender allowance.
      */
-    function _allowance(uint _fromId, uint _toId, bytes32 _symbol) constant internal returns(uint) {
+    function _allowance(uint _fromId, uint _toId, bytes32 _symbol) internal view returns(uint) {
         return assets[_symbol].wallets[_fromId].allowance[_toId];
     }
 
@@ -671,7 +733,20 @@ contract EToken2 is EToken2Interface, Ambi2EnabledFull {
      *
      * @return success.
      */
-    function proxyTransferFromWithReference(address _from, address _to, uint _value, bytes32 _symbol, string _reference, address _sender) onlyProxy(_symbol) returns(bool) {
-        return _transfer(getHolderId(_from), _createHolderId(_to), _value, _symbol, _reference, getHolderId(_sender));
+    function proxyTransferFromWithReference(
+        address _from,
+        address _to,
+        uint _value,
+        bytes32 _symbol,
+        string memory _reference,
+        address _sender)
+    public onlyProxy(_symbol) returns(bool) {
+        return _transfer(
+            getHolderId(_from),
+            _createHolderId(_to),
+            _value,
+            _symbol,
+            _reference,
+            getHolderId(_sender));
     }
 }

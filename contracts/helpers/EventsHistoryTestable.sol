@@ -1,13 +1,9 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
-
-pragma solidity 0.4.8;
+pragma solidity 0.5.8;
 
 import '../EventsHistory.sol';
-import './Ambi2EnabledFake.sol';
+import '../../dependencies/contracts/Ambi2EnabledFake.sol';
+
 
 // For testing purposes.
+// solhint-disable-next-line no-empty-blocks
 contract EventsHistoryTestable is EventsHistory, Ambi2EnabledFake {}

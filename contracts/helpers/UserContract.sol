@@ -1,27 +1,21 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
+pragma solidity 0.5.8;
 
-pragma solidity 0.4.8;
 
 contract UserContract {
     address public target;
     bool public forwarding = false;
 
-    function init(address _target) {
+    function init(address _target) public {
         target = _target;
     }
 
-    function () payable {
+    function () external payable {
         if (forwarding) {
-          return;
+            return;
         }
         forwarding = true;
-        if (!target.call.value(msg.value)(msg.data)) {
-            throw;
-        }
+        (bool res, ) = target.call.value(msg.value)(msg.data);
+        require(res);
         forwarding = false;
     }
 }

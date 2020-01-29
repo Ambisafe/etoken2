@@ -1,33 +1,30 @@
-/**
- * This software is a subject to Ambisafe License Agreement.
- * No use or distribution is allowed without written permission from Ambisafe.
- * https://www.ambisafe.co/terms-of-use/
- */
-
-pragma solidity 0.4.8;
+pragma solidity 0.5.8;
 
 import './AssetInterface.sol';
-import {AssetProxyInterface as AssetProxy} from './AssetProxyInterface.sol';
+import './AssetProxyInterface.sol';
+import '../dependencies/contracts/Bytes32.sol';
+import '../dependencies/contracts/ReturnData.sol';
+
 
 /**
  * @title EToken2 Asset implementation contract.
  *
  * Basic asset implementation contract, without any additional logic.
  * Every other asset implementation contracts should derive from this one.
- * Receives calls from the proxy, and calls back immediatly without arguments modification.
+ * Receives calls from the proxy, and calls back immediately without arguments modification.
  *
  * Note: all the non constant functions return false instead of throwing in case if state change
  * didn't happen yet.
  */
-contract Asset is AssetInterface {
+contract Asset is AssetInterface, Bytes32, ReturnData {
     // Assigned asset proxy contract, immutable.
-    AssetProxy public proxy;
+    AssetProxyInterface public proxy;
 
     /**
      * Only assigned proxy is allowed to call.
      */
     modifier onlyProxy() {
-        if (proxy == msg.sender) {
+        if (address(proxy) == msg.sender) {
             _;
         }
     }
@@ -42,8 +39,8 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function init(AssetProxy _proxy) returns(bool) {
-        if (address(proxy) != 0x0) {
+    function init(AssetProxyInterface _proxy) public returns(bool) {
+        if (address(proxy) != address(0)) {
             return false;
         }
         proxy = _proxy;
@@ -58,7 +55,16 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function _performTransferWithReference(address _to, uint _value, string _reference, address _sender) onlyProxy() returns(bool) {
+    function _performTransferWithReference(
+        address _to,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyProxy() returns(bool) {
+        if (isICAP(_to)) {
+            return _transferToICAPWithReference(
+                bytes20(_to), _value, _reference, _sender);
+        }
         return _transferWithReference(_to, _value, _reference, _sender);
     }
 
@@ -68,8 +74,14 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is virtual, and meant to be overridden.
      */
-    function _transferWithReference(address _to, uint _value, string _reference, address _sender) internal returns(bool) {
-        return proxy._forwardTransferFromWithReference(_sender, _to, _value, _reference, _sender);
+    function _transferWithReference(
+        address _to,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    internal returns(bool) {
+        return proxy._forwardTransferFromWithReference(
+            _sender, _to, _value, _reference, _sender);
     }
 
     /**
@@ -80,7 +92,12 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function _performTransferToICAPWithReference(bytes32 _icap, uint _value, string _reference, address _sender) onlyProxy() returns(bool) {
+    function _performTransferToICAPWithReference(
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyProxy() returns(bool) {
         return _transferToICAPWithReference(_icap, _value, _reference, _sender);
     }
 
@@ -90,8 +107,14 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is virtual, and meant to be overridden.
      */
-    function _transferToICAPWithReference(bytes32 _icap, uint _value, string _reference, address _sender) internal returns(bool) {
-        return proxy._forwardTransferFromToICAPWithReference(_sender, _icap, _value, _reference, _sender);
+    function _transferToICAPWithReference(
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    internal returns(bool) {
+        return proxy._forwardTransferFromToICAPWithReference(
+            _sender, _icap, _value, _reference, _sender);
     }
 
     /**
@@ -102,7 +125,17 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function _performTransferFromWithReference(address _from, address _to, uint _value, string _reference, address _sender) onlyProxy() returns(bool) {
+    function _performTransferFromWithReference(
+        address _from,
+        address _to,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyProxy() returns(bool) {
+        if (isICAP(_to)) {
+            return _transferFromToICAPWithReference(
+                _from, bytes20(_to), _value, _reference, _sender);
+        }
         return _transferFromWithReference(_from, _to, _value, _reference, _sender);
     }
 
@@ -112,8 +145,15 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is virtual, and meant to be overridden.
      */
-    function _transferFromWithReference(address _from, address _to, uint _value, string _reference, address _sender) internal returns(bool) {
-        return proxy._forwardTransferFromWithReference(_from, _to, _value, _reference, _sender);
+    function _transferFromWithReference(
+        address _from,
+        address _to,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    internal returns(bool) {
+        return proxy._forwardTransferFromWithReference(
+            _from, _to, _value, _reference, _sender);
     }
 
     /**
@@ -124,8 +164,15 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function _performTransferFromToICAPWithReference(address _from, bytes32 _icap, uint _value, string _reference, address _sender) onlyProxy() returns(bool) {
-        return _transferFromToICAPWithReference(_from, _icap, _value, _reference, _sender);
+    function _performTransferFromToICAPWithReference(
+        address _from,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    public onlyProxy() returns(bool) {
+        return _transferFromToICAPWithReference(
+            _from, _icap, _value, _reference, _sender);
     }
 
     /**
@@ -134,8 +181,15 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is virtual, and meant to be overridden.
      */
-    function _transferFromToICAPWithReference(address _from, bytes32 _icap, uint _value, string _reference, address _sender) internal returns(bool) {
-        return proxy._forwardTransferFromToICAPWithReference(_from, _icap, _value, _reference, _sender);
+    function _transferFromToICAPWithReference(
+        address _from,
+        bytes32 _icap,
+        uint _value,
+        string memory _reference,
+        address _sender)
+    internal returns(bool) {
+        return proxy._forwardTransferFromToICAPWithReference(
+            _from, _icap, _value, _reference, _sender);
     }
 
     /**
@@ -146,7 +200,8 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is final, and must not be overridden.
      */
-    function _performApprove(address _spender, uint _value, address _sender) onlyProxy() returns(bool) {
+    function _performApprove(address _spender, uint _value, address _sender)
+    public onlyProxy() returns(bool) {
         return _approve(_spender, _value, _sender);
     }
 
@@ -156,7 +211,8 @@ contract Asset is AssetInterface {
      * @return success.
      * @dev function is virtual, and meant to be overridden.
      */
-    function _approve(address _spender, uint _value, address _sender) internal returns(bool) {
+    function _approve(address _spender, uint _value, address _sender)
+    internal returns(bool) {
         return proxy._forwardApprove(_spender, _value, _sender);
     }
 
@@ -168,42 +224,74 @@ contract Asset is AssetInterface {
      * @return bytes32 result.
      * @dev function is final, and must not be overridden.
      */
-    function _performGeneric(bytes _data, address _sender) payable onlyProxy() returns(bytes32) {
-        return _generic(_data, _sender);
+    function _performGeneric(bytes memory _data, address _sender)
+    public payable onlyProxy() {
+        _generic(_data, msg.value, _sender);
     }
 
     modifier onlyMe() {
-        if (this == msg.sender) {
+        if (address(this) == msg.sender) {
             _;
         }
     }
 
     // Most probably the following should never be redefined in child contracts.
-    address genericSender;
-    function _generic(bytes _data, address _sender) internal returns(bytes32) {
-        // Restrict reentrancy.
-        if (genericSender != 0x0) {
-            throw;
-        }
-        genericSender = _sender;
-        bytes32 result = _callReturn(this, _data, msg.value);
-        delete genericSender;
-        return result;
-    }
+    address public genericSender;
 
-    function _callReturn(address _target, bytes _data, uint _value) internal returns(bytes32 result) {
-        bool success;
-        assembly {
-            success := call(div(mul(gas, 63), 64), _target, _value, add(_data, 32), mload(_data), 0, 32)
-            result := mload(0)
-        }
-        if (!success) {
-            throw;
-        }
+    function _generic(bytes memory _data, uint _value, address _msgSender) internal {
+        // Restrict reentrancy.
+        require(genericSender == address(0));
+        genericSender = _msgSender;
+        bool success = _assemblyCall(address(this), _value, _data);
+        delete genericSender;
+        _returnReturnData(success);
     }
 
     // Decsendants should use _sender() instead of msg.sender to properly process proxied calls.
-    function _sender() constant internal returns(address) {
-        return this == msg.sender ? genericSender : msg.sender;
+    function _sender() internal view returns(address) {
+        return address(this) == msg.sender ? genericSender : msg.sender;
+    }
+
+    // Interface functions to allow specifying ICAP addresses as strings.
+    function transferToICAP(string memory _icap, uint _value) public returns(bool) {
+        return transferToICAPWithReference(_icap, _value, '');
+    }
+
+    function transferToICAPWithReference(string memory _icap, uint _value, string memory _reference)
+    public returns(bool) {
+        return _transferToICAPWithReference(
+            _bytes32(_icap), _value, _reference, _sender());
+    }
+
+    function transferFromToICAP(address _from, string memory _icap, uint _value)
+    public returns(bool) {
+        return transferFromToICAPWithReference(_from, _icap, _value, '');
+    }
+
+    function transferFromToICAPWithReference(
+        address _from,
+        string memory _icap,
+        uint _value,
+        string memory _reference)
+    public returns(bool) {
+        return _transferFromToICAPWithReference(
+            _from, _bytes32(_icap), _value, _reference, _sender());
+    }
+
+    function isICAP(address _address) public pure returns(bool) {
+        bytes20 a = bytes20(_address);
+        if (a[0] != 'X' || a[1] != 'E') {
+            return false;
+        }
+        if (uint8(a[2]) < 48 || uint8(a[2]) > 57 || uint8(a[3]) < 48 || uint8(a[3]) > 57) {
+            return false;
+        }
+        for (uint i = 4; i < 20; i++) {
+            uint char = uint8(a[i]);
+            if (char < 48 || char > 90 || (char > 57 && char < 65)) {
+                return false;
+            }
+        }
+        return true;
     }
 }

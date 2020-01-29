@@ -1,0 +1,20 @@
+{
+  "extends": "solhint:default",
+  "rules": {
+    "indent": ["error", 4],
+    "quotes": ["error", "single"],
+    "max-line-length": ["error", 100],
+    "avoid-call-value": false,
+    "no-complex-fallback": false,
+    "multiple-sends": false,
+    "no-inline-assembly": false,
+    "avoid-low-level-calls": false,
+    "func-param-name-mixedcase": false,
+    "func-name-mixedcase": false,
+    "func-order": false,
+    "payable-fallback": false,
+    "function-max-lines": false,
+    "code-complexity": false,
+    "max-states-count": false
+  }
+}

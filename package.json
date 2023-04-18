@@ -28,7 +28,7 @@
     "argparse": "1.0.10",
     "bluebird": "3.5.4",
     "ganache-cli": "6.4.3",
-    "truffle": "5.1.10"
+    "truffle": "5.8.2"
   },
   "devDependencies": {
     "chai": "4.2.0",

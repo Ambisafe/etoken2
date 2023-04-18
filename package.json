@@ -27,7 +27,7 @@
   "dependencies": {
     "argparse": "1.0.10",
     "bluebird": "3.5.4",
-    "ganache-cli": "6.4.3",
+    "ganache-cli": "6.12.2",
     "truffle": "5.1.10"
   },
   "devDependencies": {
